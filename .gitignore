@@ -1,0 +1,6 @@
+# Entorno virtual de Python
+venv/
+.venv/
+
+# Carpeta interna de Git (no recomendado ignorarla)
+.git/

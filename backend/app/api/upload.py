@@ -1,50 +1,98 @@
-# app/api/upload.py
-import os
-import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException 
-from core.config import UPLOAD_FOLDER, TOPIC_DOCUMENT_UPLOADED
-from typing import List
-from app.services.kafka import send_event
+from uuid import uuid4
 
-router = APIRouter() 
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-@router.post("/upload") 
-async def upload(files: List[UploadFile] = File(...)): 
+from app.core.config import settings
+from app.schemas.api import UploadAcceptedItem, UploadAcceptedResponse
+from app.schemas.events import DocumentUploadedPayload, EventEnvelope
+from app.services.document_registry import DocumentRegistryService
+from app.services.file_storage import FileStorageService
+from app.services.kafka_producer import KafkaProducerService
+from app.services.redis_state import RedisStateService
 
-    if not files: 
-        raise HTTPException(status_code=400, detail="No files provided")
-    
-    processed = []
-    for file in files: 
+router = APIRouter(prefix="/api", tags=["upload"])
 
-        document_id = str(uuid.uuid4())
+ALLOWED_EXTENSIONS = {".pdf", ".md", ".txt"}
 
-        file_name = file.filename.lower() 
-        if not (file_name.endswith(".pdf") or file_name.endswith(".md")): 
-            raise HTTPException( status_code=400, detail=f"{file.filename} must be PDF or Markdown" ) 
-        
-        content = await file.read() 
 
-        if not content: 
-            raise HTTPException( status_code=400, detail=f"{file.filename} is empty" ) 
-        
-        unique_file_name = f"{document_id}_{file_name}"
-        file_path = os.path.join(UPLOAD_FOLDER, unique_file_name)
+@router.post("/upload", response_model=UploadAcceptedResponse)
+async def upload_documents(
+    files: list[UploadFile] = File(...),
+    document_ids: str | None = Form(default=None),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="Debe enviar al menos un archivo.")
 
-        with open(file_path, "wb") as f:
-            f.write(content)
+    provided_document_ids = []
+    if document_ids:
+        provided_document_ids = [item.strip() for item in document_ids.split(",") if item.strip()]
+        if provided_document_ids and len(provided_document_ids) != len(files):
+            raise HTTPException(
+                status_code=400,
+                detail="Si envía document_ids, debe haber uno por archivo.",
+            )
 
-        event = {
-            "document_id": document_id,
-            "filename": file_name,
-            "path": file_path
-        }
+    storage = FileStorageService()
+    registry = DocumentRegistryService()
+    redis_state = RedisStateService()
+    producer = KafkaProducerService()
 
-        send_event(TOPIC_DOCUMENT_UPLOADED, event)
+    batch_id = str(uuid4())
+    accepted_items: list[UploadAcceptedItem] = []
 
-        processed.append({
-            "document_id": document_id,
-            "filename": file_name
-        })
+    for index, file in enumerate(files):
+        suffix = "." + file.filename.split(".")[-1].lower() if "." in file.filename else ""
+        if suffix not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.filename}")
 
-    return {"status": "success", "files": processed}
+        logical_document_id = provided_document_ids[index] if provided_document_ids else str(uuid4())
+        _, path, content_hash = await storage.save_upload(file)
+        file_version = registry.reserve_next_version(logical_document_id)
+        registry.set_current_hash(logical_document_id, file_version, content_hash)
+        correlation_id = str(uuid4())
+
+        payload = DocumentUploadedPayload(
+            batch_id=batch_id,
+            document_id=logical_document_id,
+            file_version=file_version,
+            filename=file.filename,
+            path=path,
+            content_hash=content_hash,
+            content_type=file.content_type,
+        )
+
+        event = EventEnvelope(
+            event_type="document.uploaded",
+            correlation_id=correlation_id,
+            pipeline_version=settings.pipeline_version,
+            payload=payload.model_dump(),
+        )
+
+        redis_state.set_document_status(
+            logical_document_id,
+            batch_id=batch_id,
+            filename=file.filename,
+            file_version=file_version,
+            status="UPLOADED",
+            progress=10,
+            stage_message="Archivo recibido y enviado a la cola",
+        )
+
+        producer.publish(
+            settings.kafka_topic_uploaded,
+            event.model_dump(mode="json"),
+            key=logical_document_id,
+        )
+
+        accepted_items.append(
+            UploadAcceptedItem(
+                filename=file.filename,
+                document_id=logical_document_id,
+                file_version=file_version,
+                correlation_id=correlation_id,
+                batch_id=batch_id,
+                status="UPLOADED",
+            )
+        )
+
+    return UploadAcceptedResponse(batch_id=batch_id, items=accepted_items)

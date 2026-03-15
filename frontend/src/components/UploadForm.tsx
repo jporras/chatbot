@@ -1,146 +1,284 @@
-import { useState, useCallback } from "react";
+import { useMemo, useRef, useState } from "react";
+import { uploadSingleDocument, type UploadResponse } from "../lib/api";
+
+type UploadJob = {
+  localId: string;
+  filename: string;
+  documentId?: string;
+  correlationId?: string;
+  fileVersion?: number;
+  status:
+    | "SELECTED"
+    | "UPLOADING"
+    | "UPLOADED"
+    | "PARSING"
+    | "CHUNKED"
+    | "EMBEDDING"
+    | "INDEXED"
+    | "FAILED";
+  progress: number;
+  stageMessage?: string;
+  error?: string | null;
+};
+
+
+const ALLOWED_EXTENSIONS = [".pdf", ".md", ".txt"];
+
+function isValidFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+function fileKey(file: File): string {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+export type DocumentStatusResponse = {
+  document_id: string;
+  file_version?: number;
+  filename?: string;
+  status: string;
+  progress?: number;
+  stage_message?: string;
+  updated_at?: string;
+  error?: string | null;
+};
+
+export async function getDocumentStatus(documentId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/status`);
+  if (!response.ok) {
+    throw new Error("No se pudo consultar el estado del documento.");
+  }
+  return (await response.json()) as DocumentStatusResponse;
+}
 
 export default function UploadForm() {
-  const [files, setFiles] = useState<File[]>([]);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const [documentId, setDocumentId] = useState("");
+  const [files, setFiles] = useState<UploadItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [results, setResults] = useState<UploadResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const validateFiles = (fileList: FileList | null) => {
-    if (!fileList) return [];
+  const fileCountLabel = useMemo(() => {
+    if (files.length === 0) return "No hay archivos seleccionados";
+    if (files.length === 1) return "1 archivo listo para subir";
+    return `${files.length} archivos listos para subir`;
+  }, [files.length]);
 
-    return Array.from(fileList).filter((file) => {
-      const validTypes = ["application/pdf", "text/markdown"];
-      return (
-        validTypes.includes(file.type) ||
-        file.name.endsWith(".pdf") ||
-        file.name.endsWith(".md")
-      );
+  function appendFiles(fileList: FileList | null) {
+    if (!fileList) return;
+
+    const validFiles = Array.from(fileList).filter(isValidFile);
+    const incoming = validFiles.map((file) => ({ file, id: fileKey(file) }));
+
+    setFiles((prev) => {
+      const seen = new Set(prev.map((item) => item.id));
+      const dedupedIncoming = incoming.filter((item) => !seen.has(item.id));
+      return [...prev, ...dedupedIncoming];
     });
-  };
+  }
 
-  const handleFiles = (fileList: FileList | null) => {
-    const valid = validateFiles(fileList);
-    setFiles((prev) => [...prev, ...valid]);
-  };
+  function removeFile(id: string) {
+    setFiles((prev) => prev.filter((item) => item.id !== id));
+  }
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-    handleFiles(e.dataTransfer.files);
-  };
-
-  const handleUpload = async () => {
+  async function handleUpload() {
     if (files.length === 0) return;
 
     setIsUploading(true);
+    setError(null);
+    setResults([]);
 
-    const formData = new FormData();
-
-    for (const file of files) {
-      formData.append("files", file);
-    }
+    const uploaded: UploadResult[] = [];
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+      for (const item of files) {
+        const response = await uploadSingleDocument({
+          file: item.file,
+          documentId: documentId || undefined,
+        });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.detail || "Upload failed");
+        uploaded.push({
+          ...response,
+          filename: item.file.name,
+        });
       }
 
-      console.log("Upload result:", data);
-
+      setResults(uploaded);
+      setFiles([]);
+      setDocumentId("");
     } catch (err) {
-      console.error(err);
-      if (err instanceof Error) {
-        alert(err.message);
-      }
+      setError(err instanceof Error ? err.message : "Ocurrió un error al subir.");
+    } finally {
+      setIsUploading(false);
     }
+  }
 
-    setIsUploading(false);
-    setFiles([]);
-  };
   return (
-    <div className="w-full min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
-      <div className="w-full max-w-xl bg-slate-900 rounded-2xl shadow-2xl p-8 space-y-6">
+    <section className="mx-auto max-w-4xl">
+      <div className="mb-8">
+        <p className="text-sm uppercase tracking-[0.25em] text-cyan-400">
+          Upload
+        </p>
+        <h2 className="mt-2 text-3xl font-semibold">Subir documentos al pipeline</h2>
+        <p className="mt-3 max-w-2xl text-sm text-slate-400">
+          Envía archivos PDF, Markdown o TXT al backend. Si indicas un{" "}
+          <code className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">
+            document_id
+          </code>{" "}
+          el backend podrá tratarlos como nuevas versiones del mismo documento.
+        </p>
+      </div>
 
-        <h1 className="text-2xl font-bold text-center">
-          Subir Documentos
-        </h1>
+      <div className="space-y-6 rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl shadow-black/20">
+        <div>
+          <label htmlFor="documentId" className="mb-2 block text-sm font-medium text-slate-200">
+            ID lógico del documento (opcional)
+          </label>
+          <input
+            id="documentId"
+            type="text"
+            value={documentId}
+            onChange={(e) => setDocumentId(e.target.value)}
+            placeholder="ej. manual-empleados"
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-500"
+          />
+        </div>
 
         <div
-          onDrop={handleDrop}
           onDragOver={(e) => {
             e.preventDefault();
             setIsDragging(true);
           }}
           onDragLeave={() => setIsDragging(false)}
-          className={`border-2 border-dashed rounded-xl p-10 text-center transition-all duration-300
-          ${isDragging 
-            ? "border-blue-500 bg-slate-800 scale-105" 
-            : "border-slate-600 bg-slate-800/50"}
-          `}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            appendFiles(e.dataTransfer.files);
+          }}
+          className={`rounded-2xl border-2 border-dashed p-8 text-center transition ${
+            isDragging
+              ? "border-cyan-500 bg-cyan-500/10"
+              : "border-slate-700 bg-slate-950/70"
+          }`}
         >
-          <p className="text-slate-300">
-            Arrastra tus archivos PDF o MD aquí
+          <p className="text-lg font-medium text-slate-100">
+            Arrastra tus archivos aquí
+          </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Se aceptan PDF, MD y TXT.
           </p>
 
-          <p className="text-sm text-slate-500 mt-2">
-            o selecciónalos manualmente
-          </p>
-
-          <input
-            type="file"
-            multiple
-            accept=".pdf,.md"
-            onChange={(e) => handleFiles(e.target.files)}
-            className="hidden"
-            id="fileInput"
-          />
-
-          <label
-            htmlFor="fileInput"
-            className="inline-block mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer transition"
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="mt-5 rounded-xl bg-cyan-500 px-4 py-3 font-medium text-slate-950 transition hover:bg-cyan-400"
           >
             Seleccionar archivos
-          </label>
+          </button>
+
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept=".pdf,.md,.txt"
+            className="hidden"
+            onChange={(e) => appendFiles(e.target.files)}
+          />
         </div>
 
-        {files.length > 0 && (
-          <div className="bg-slate-800 rounded-lg p-4 max-h-40 overflow-y-auto">
-            <ul className="space-y-2 text-sm">
-              {files.map((file, index) => (
+        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
+          <p className="text-sm font-medium text-slate-200">{fileCountLabel}</p>
+
+          {files.length > 0 && (
+            <ul className="mt-4 space-y-3">
+              {files.map((item) => (
                 <li
-                  key={index}
-                  className="flex justify-between items-center bg-slate-700 px-3 py-2 rounded-md"
+                  key={item.id}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3"
                 >
-                  <span className="truncate">{file.name}</span>
-                  <span className="text-xs text-slate-400">
-                    {(file.size / 1024).toFixed(1)} KB
-                  </span>
+                  <div>
+                    <p className="font-medium text-slate-100">{item.file.name}</p>
+                    <p className="text-sm text-slate-400">
+                      {(item.file.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removeFile(item.id)}
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
+                  >
+                    Quitar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-rose-800 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
+            {error}
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-300">
+              Subidas realizadas
+            </h3>
+
+            <ul className="mt-4 space-y-3">
+              {results.map((result, index) => (
+                <li
+                  key={`${result.document_id}-${index}`}
+                  className="rounded-xl border border-emerald-900/60 bg-slate-950/50 p-4"
+                >
+                  <p className="font-medium text-slate-100">{result.filename}</p>
+                  <p className="mt-1 text-sm text-slate-300">
+                    document_id:{" "}
+                    <code className="rounded bg-slate-800 px-1.5 py-0.5">
+                      {result.document_id}
+                    </code>
+                  </p>
+                  {typeof result.file_version !== "undefined" && (
+                    <p className="mt-1 text-sm text-slate-300">
+                      versión:{" "}
+                      <code className="rounded bg-slate-800 px-1.5 py-0.5">
+                        {result.file_version}
+                      </code>
+                    </p>
+                  )}
+                  {result.correlation_id && (
+                    <p className="mt-1 text-sm text-slate-400">
+                      correlation_id:{" "}
+                      <code className="rounded bg-slate-800 px-1.5 py-0.5">
+                        {result.correlation_id}
+                      </code>
+                    </p>
+                  )}
+                  <p className="mt-2 text-sm text-emerald-300">{result.message}</p>
                 </li>
               ))}
             </ul>
           </div>
         )}
 
-        <button
-          onClick={handleUpload}
-          disabled={isUploading || files.length === 0}
-          className={`w-full py-3 rounded-xl font-semibold transition-all duration-300
-          ${isUploading
-            ? "bg-slate-600 cursor-not-allowed"
-            : "bg-emerald-600 hover:bg-emerald-700 hover:scale-[1.02]"}
-          `}
-        >
-          {isUploading ? "Subiendo..." : "Subir archivos"}
-        </button>
-
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={files.length === 0 || isUploading}
+            onClick={handleUpload}
+            className="rounded-xl bg-cyan-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUploading ? "Subiendo..." : "Enviar al backend"}
+          </button>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

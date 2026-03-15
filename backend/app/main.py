@@ -1,14 +1,12 @@
-# app/main.py
-from dotenv import load_dotenv
-load_dotenv()
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core import dependencies
-from app.api import upload, ask
+from app.api.ask import router as ask_router
+from app.api.documents import router as documents_router
+from app.api.health import router as health_router
+from app.api.upload import router as upload_router
 
-app = FastAPI(title="RAG Service")
+app = FastAPI(title="Chatbot RAG API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,5 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(upload.router, prefix="/api", tags=["Ingestion"])
-app.include_router(ask.router, prefix="/api", tags=["QA"])
+app.include_router(health_router)
+app.include_router(upload_router)
+app.include_router(documents_router)
+app.include_router(ask_router)

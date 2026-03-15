@@ -1,164 +1,292 @@
-Chatbot Project
+Chatbot RAG Platform
 
-Aplicación fullstack compuesta por:
+Plataforma de chatbot basada en Retrieval Augmented Generation (RAG) para consultar documentos mediante un modelo LLM local.
 
-Backend en Python (FastAPI)
+La arquitectura utiliza un pipeline distribuido para ingestión de documentos, generación de embeddings y recuperación semántica antes de generar respuestas con un modelo de lenguaje.
 
-Frontend en Node.js
-
-Integración con modelo LLM (ej: OpenAI)
-
-Sistema de embeddings y consultas
-
-📦 Requisitos Previos
-
-Antes de empezar, necesitas tener instalado:
-
-Python 3.10+
-
-Node.js 18+
-
-Git
-
-Puedes verificar:
-
-python --version
-node --version
-git --version
-🚀 Instalación Paso a Paso
-1️⃣ Clonar el repositorio
-git clone https://github.com/tu-usuario/chatbot.git
-cd chatbot
-2️⃣ Backend (FastAPI)
-
-Ubicación:
-
-backend/
-Crear entorno virtual
-
-Windows:
-
-python -m venv venv
-venv\Scripts\activate
-
-Mac/Linux:
-
-python3 -m venv venv
-source venv/bin/activate
-Instalar dependencias
-pip install -r requirements.txt
-Configurar variables de entorno
-
-Crea un archivo .env dentro de backend/ con:
-
-OPENAI_API_KEY=tu_api_key
-3️⃣ Frontend (Node.js)
-
-Ubicación:
-
-frontend/
-
-Instalar dependencias:
-
-npm install
-
-Si usa Vite:
-
-npm run dev
-
-Si usa Next.js:
-
-npm run dev
-▶️ Ejecutar el Proyecto
-Iniciar Backend
-
-Desde:
-
-backend/
-uvicorn app.main:app --reload
-
-Servidor disponible en:
-
-http://localhost:8000
-
-Docs automáticas:
-
-http://localhost:8000/docs
-Iniciar Frontend
-
-Desde:
-
-frontend/
-npm run dev
-
-Normalmente corre en:
-
-http://localhost:5173
-
-o
-
-http://localhost:3000
-
-# arquitectura temporal
-
-backend
- ├── api
- │   ├── main.py
- │   └── routes
- │        └── upload.py
- │
- ├── services
- │   └── kafka_producer.py
- │
- ├── workers
- │   ├── parser_worker.py
- │   ├── embedding_worker.py
- │   └── chroma_worker.py
- │
- ├── core
- │   ├── config.py
- │   └── dependencies.py
- │
- └── rag
-     ├── loader.py
-     ├── chunker.py
-     ├── embedding.py
-     └── vector_store.py
-
-
-# Flujo
-
-Browser
+Arquitectura
+Flujo general
+Usuario
+   │
+   ▼
+Frontend (React + Vite)
    │
    ▼
 Nginx (reverse proxy)
    │
-   ├── / → Frontend (React + Vite)
-   └── /api → FastAPI
-                │
-                ▼
-              Kafka
-          (event pipeline)
-                │
-        ┌───────┴────────┐
-        ▼                ▼
-   parser_worker     embedding_worker
-        │                │
-        ▼                ▼
-      chunks          embeddings
-        │                │
-        └───────► ChromaDB
-                       │
-                       ▼
-                     Ollama
-                 (LLM inference)
+   ▼
+FastAPI Backend
+   │
+   ├── Upload documentos
+   ├── Consulta preguntas
+   │
+   ▼
+Kafka Event Bus
+   │
+   ├── Parser Worker
+   ├── Embedding Worker
+   │
+   ▼
+ChromaDB (vector store)
+   │
+   ▼
+Recuperación de contexto
+   │
+   ▼
+Ollama (LLM)
+   │
+   ▼
+Respuesta al usuario
 
-Shared state
-     │
-     ▼
-    Redis
+Tecnologías
+Frontend
 
-Observability
+React
+
+Vite
+
+Interfaz web para:
+
+subir documentos
+
+hacer preguntas al chatbot
+
+visualizar respuestas
+
+Backend
+
+FastAPI
+
+Responsabilidades:
+
+API REST
+
+ingestión de documentos
+
+recuperación de contexto
+
+conexión con el LLM
+
+Endpoints principales:
+
+POST /api/upload
+POST /api/ask
+
+Procesamiento Asíncrono
+
+Apache Kafka
+
+Kafka se usa para desacoplar el pipeline de procesamiento:
+
+upload → kafka topic → parser worker → embedding worker
+
+
+Ventajas:
+
+escalabilidad
+
+resiliencia
+
+procesamiento paralelo
+
+Vector Store
+
+ChromaDB
+
+Función:
+
+almacenar embeddings
+
+realizar búsqueda semántica
+
+Operaciones principales:
+
+add_documents()
+similarity_search()
+
+Modelo de Lenguaje
+
+Ollama
+
+Se usa para:
+
+generar respuestas
+
+combinar pregunta + contexto recuperado
+
+Ejemplo de modelos posibles:
+
+llama3
+mistral
+phi3
+
+Estado y Cache
+
+Redis
+
+Uso:
+
+almacenamiento temporal
+
+estado compartido
+
+caché de resultados
+
+Observabilidad
+Métricas
+
+Prometheus
+
+Recolecta métricas de:
+
+backend
+
+workers
+
+vector search
+
+Dashboards
+
+Grafana
+
+Visualiza:
+
+latencia
+
+throughput
+
+uso del modelo
+
+Estructura del proyecto
+chatbot/
+
+backend/
+ └ app/
+     ├ api/
+     │   ├ ask.py
+     │   └ upload.py
      │
-     ├── Prometheus
-     └── Grafana
+     ├ core/
+     │   └ config.py
+     │
+     ├ rag/
+     │   ├ loader.py
+     │   ├ chunker.py
+     │   └ vector_store.py
+     │
+     ├ ingest/
+     │   ├ ingest.py
+     │   ├ rag.py
+     │   └ llm.py
+     │
+     ├ services/
+     │   └ kafka.py
+     │
+     ├ workers/
+     │   ├ parser.py
+     │   └ embeddings.py
+     │
+     └ main.py
+
+frontend/
+ └ src/
+     ├ components/
+     ├ App.tsx
+     └ main.tsx
+
+nginx/
+kafka/
+redis/
+chromadb/
+prometheus/
+grafana/
+ollama/
+
+Pipeline RAG
+1️⃣ Ingestión de documentos
+Usuario sube documento
+       │
+       ▼
+FastAPI /upload
+       │
+       ▼
+Kafka topic
+       │
+       ▼
+Parser Worker
+
+
+Se realiza:
+
+lectura del documento
+
+extracción de texto
+
+chunking
+
+2️⃣ Generación de embeddings
+Chunks
+   │
+   ▼
+Embedding Worker
+   │
+   ▼
+Vector Store
+
+
+Se crean embeddings y se almacenan en ChromaDB.
+
+3️⃣ Consulta del usuario
+Pregunta usuario
+      │
+      ▼
+FastAPI /ask
+      │
+      ▼
+embedding de pregunta
+      │
+      ▼
+similarity search
+
+
+Se recuperan los chunks más relevantes.
+
+4️⃣ Generación de respuesta
+Pregunta + contexto
+        │
+        ▼
+Ollama
+        │
+        ▼
+Respuesta final
+
+Despliegue
+
+Servicios principales en contenedores:
+
+frontend
+nginx
+backend
+kafka
+redis
+chromadb
+ollama
+prometheus
+grafana
+
+
+Se orquestan con:
+
+docker compose
+
+Objetivo del proyecto
+
+Construir una plataforma modular de RAG que permita:
+
+ingestión de documentos
+
+consultas semánticas
+
+modelos LLM locales
+
+arquitectura escalable basada en eventos

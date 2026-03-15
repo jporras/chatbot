@@ -98,3 +98,67 @@ http://localhost:5173
 o
 
 http://localhost:3000
+
+# arquitectura temporal
+
+backend
+ ├── api
+ │   ├── main.py
+ │   └── routes
+ │        └── upload.py
+ │
+ ├── services
+ │   └── kafka_producer.py
+ │
+ ├── workers
+ │   ├── parser_worker.py
+ │   ├── embedding_worker.py
+ │   └── chroma_worker.py
+ │
+ ├── core
+ │   ├── config.py
+ │   └── dependencies.py
+ │
+ └── rag
+     ├── loader.py
+     ├── chunker.py
+     ├── embedding.py
+     └── vector_store.py
+
+
+# Flujo
+
+Browser
+   │
+   ▼
+Nginx (reverse proxy)
+   │
+   ├── / → Frontend (React + Vite)
+   └── /api → FastAPI
+                │
+                ▼
+              Kafka
+          (event pipeline)
+                │
+        ┌───────┴────────┐
+        ▼                ▼
+   parser_worker     embedding_worker
+        │                │
+        ▼                ▼
+      chunks          embeddings
+        │                │
+        └───────► ChromaDB
+                       │
+                       ▼
+                     Ollama
+                 (LLM inference)
+
+Shared state
+     │
+     ▼
+    Redis
+
+Observability
+     │
+     ├── Prometheus
+     └── Grafana

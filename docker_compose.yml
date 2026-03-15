@@ -1,0 +1,107 @@
+version: "3.9"
+services:
+  # ... tus otros servicios (backend, kafka, redis) ...
+
+  chroma:
+    build:
+      context: ./chroma
+      dockerfile: Dockerfile
+    container_name: chromadb
+    ports:
+      - "8001:8000" # Acceso desde tu Windows en el 8001
+    volumes:
+      - ./chroma_data:/chroma/chroma # Para que no se borren tus vectores
+    environment:
+      - IS_PERSISTENT=TRUE
+    restart: unless-stopped
+  kafka:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile
+    container_name: kafka_broker
+    ports:
+      - "9092:9092" # Puerto para que tu VS Code/Windows se conecte
+    environment:
+      # ID del nodo y roles (Broker y Controller para KRaft)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      
+      # Protocolos de comunicación
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      
+      # Listeners: 
+      # - El puerto 9093 es interno para el controlador.
+      # - El puerto 9092 es para datos.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      
+      # ESTO ES LO MÁS IMPORTANTE:
+      # 'kafka:9092' permite que el backend lo encuentre dentro de Docker.
+      # 'localhost:9092' permite que tú lo veas desde afuera.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      
+      # Configuración para desarrollo (un solo nodo)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      
+      # ID de cluster aleatorio para KRaft
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    volumes:
+      - ./kafka_data:/var/lib/kafka/data # Persistencia de mensajes
+    restart: unless-stopped
+
+  redis:
+    build:
+      context: ./redis
+      dockerfile: Dockerfile
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data # Los datos se guardarán en esta carpeta local
+    restart: unless-stopped
+    # Opcional: poner un límite de memoria para que no consuma toda tu RAM
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  prometheus:
+      build:
+        context: ./prometheus
+        dockerfile: Dockerfile
+      container_name: prometheus_db
+      ports:
+        - "9090:9090" # Podrás entrar a http://localhost:9090 para ver los datos crudos
+      volumes:
+        - ./prometheus_data:/prometheus # Persistencia de métricas
+      command: # Sobrescribimos para asegurar que use la ruta de datos correcta
+        - '--config.file=/etc/prometheus/prometheus.yml'
+        - '--storage.tsdb.path=/prometheus'
+      restart: unless-stopped
+      networks:
+        - app-network # Es buena práctica que todos estén en la misma red
+  grafana:
+    build:
+      context: ./grafana
+      dockerfile: Dockerfile
+    container_name: grafana_ui
+    ports:
+      - "3001:3000" # Lo mapeamos al 3001 para no chocar si tienes otro servicio
+    volumes:
+      - ./grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin # Cambia esto en producción
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  networks:
+    app-network:
+      driver: bridge

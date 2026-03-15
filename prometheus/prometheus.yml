@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s # Tiempo entre cada recolección de datos
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'fastapi-backend'
+    static_configs:
+      - targets: ['backend:8000'] # El nombre del servicio en el compose
+
+  # Si agregas exporters para Redis o Kafka, los pondrías aquí:
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']

@@ -71,6 +71,10 @@ override.tf.json
 # =========================
 *.retry
 
+
+# =========================
+# RAG
+# =========================
 chroma_data
 models
 uploads

@@ -6,7 +6,8 @@ OLLAMA_PID=$!
 
 sleep 5
 
-ollama pull llama3
-ollama pull nomic-embed-text
+if [ -n "$LLM_MODEL" ]; then
+  ollama pull $LLM_MODEL
+fi
 
 wait $OLLAMA_PID

@@ -4,8 +4,8 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.rag.query_service import QueryService
 from app.schemas.api import AskAcceptedResponse, AskRequest
+from app.services.query_service import QueryService
 from app.services.redis_state import RedisStateService
 from app.services.sse import redis_pubsub_stream, sse_format
 

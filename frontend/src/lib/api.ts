@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
+export const API_BASE_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
 
 export type UploadResponse = {
   message: string;
@@ -25,6 +25,37 @@ export type AskResponse = {
   sources?: AskSource[];
 };
 
+export type AskAcceptedResponse = {
+  query_id: string;
+  status: string;
+};
+
+export type UploadBatchItem = {
+  filename: string;
+  document_id: string;
+  file_version: number;
+  correlation_id: string;
+  batch_id: string;
+  status: string;
+};
+
+export type UploadBatchResponse = {
+  batch_id: string;
+  items: UploadBatchItem[];
+};
+
+export type DocumentStatus = {
+  document_id: string;
+  batch_id: string;
+  filename: string;
+  file_version: number;
+  status: string;
+  progress: number;
+  stage_message: string;
+  updated_at: string;
+  error?: string | null;
+};
+
 async function parseJsonSafe<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text) return null;
@@ -36,15 +67,16 @@ async function parseJsonSafe<T>(response: Response): Promise<T | null> {
   }
 }
 
-export async function uploadSingleDocument(params: {
-  file: File;
-  documentId?: string;
-}): Promise<UploadResponse> {
+export async function uploadDocuments(
+  files: File[],
+  documentIds?: string[],
+): Promise<UploadBatchResponse> {
   const formData = new FormData();
-  formData.append("file", params.file);
-
-  if (params.documentId?.trim()) {
-    formData.append("document_id", params.documentId.trim());
+  for (const file of files) {
+    formData.append("files", file);
+  }
+  if (documentIds && documentIds.length > 0) {
+    formData.append("document_ids", documentIds.join(","));
   }
 
   const response = await fetch(`${API_BASE_URL}/api/upload`, {
@@ -52,31 +84,39 @@ export async function uploadSingleDocument(params: {
     body: formData,
   });
 
-  const data = await parseJsonSafe<UploadResponse | { detail?: string }>(response);
+  const data = await parseJsonSafe<UploadBatchResponse | { detail?: string }>(response);
 
   if (!response.ok) {
     throw new Error(
-      (data && "detail" in data && data.detail) || "No se pudo subir el documento.",
+      (data && "detail" in data && data.detail) || "No se pudo subir el lote de documentos.",
     );
   }
 
-  if (!data || !("document_id" in data)) {
-    throw new Error("La respuesta del backend para upload no es válida.");
+  if (!data || !("batch_id" in data) || !Array.isArray(data.items)) {
+    throw new Error("La respuesta del backend para upload batch no es válida.");
   }
 
   return data;
 }
 
-export async function askQuestion(question: string): Promise<AskResponse> {
+export async function askQuestion(params: {
+  question: string;
+  userId?: string;
+  sessionId?: string;
+}): Promise<AskAcceptedResponse> {
   const response = await fetch(`${API_BASE_URL}/api/ask`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({
+      question: params.question,
+      user_id: params.userId ?? "web-user",
+      session_id: params.sessionId ?? "default",
+    }),
   });
 
-  const data = await parseJsonSafe<AskResponse | { detail?: string }>(response);
+  const data = await parseJsonSafe<AskAcceptedResponse | { detail?: string }>(response);
 
   if (!response.ok) {
     throw new Error(
@@ -84,7 +124,7 @@ export async function askQuestion(question: string): Promise<AskResponse> {
     );
   }
 
-  if (!data || !("answer" in data)) {
+  if (!data || !("query_id" in data)) {
     throw new Error("La respuesta del backend para ask no es válida.");
   }
 

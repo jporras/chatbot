@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.services.redis_state import RedisStateService
@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api", tags=["documents"])
 @router.get("/documents/{document_id}/status")
 def get_document_status(document_id: str):
     state = RedisStateService()
-    return state.get_document_status(document_id) or {"detail": "Not found"}
+    status = state.get_document_status(document_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return status
 
 
 @router.get("/uploads/{batch_id}/status")

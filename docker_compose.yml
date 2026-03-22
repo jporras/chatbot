@@ -1,75 +1,154 @@
 version: "3.9"
-services:
-  # ... tus otros servicios (backend, kafka, redis) ...
 
+services:
   chroma:
     build:
       context: ./chroma
       dockerfile: Dockerfile
     container_name: chromadb
+    mem_limit: 512m
+    mem_reservation: 256m
     ports:
-      - "8001:8000" # Acceso desde tu Windows en el 8001
+      - "8001:8000"
     volumes:
-      - ./chroma_data:/chroma/chroma # Para que no se borren tus vectores
+      - ./chroma_data:/chroma/chroma
     environment:
-      - IS_PERSISTENT=TRUE
+<<<<<<< ours
+      IS_PERSISTENT: "TRUE"
     restart: unless-stopped
+    networks:
+      - app-network
+
+=======
+      - IS_PERSISTENT=TRUE
+      - CHROMA_SERVER_NOFILE=4096
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    networks:
+      - app-network
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
   kafka:
     build:
       context: ./kafka
       dockerfile: Dockerfile
     container_name: kafka_broker
+    mem_limit: 512m
+    mem_reservation: 256m
     ports:
-      - "9092:9092" # Puerto para que tu VS Code/Windows se conecte
+      - "9092:29092"
     environment:
-      # ID del nodo y roles (Broker y Controller para KRaft)
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      
-      # Protocolos de comunicación
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      
-      # Listeners: 
-      # - El puerto 9093 es interno para el controlador.
-      # - El puerto 9092 es para datos.
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      
-      # ESTO ES LO MÁS IMPORTANTE:
-      # 'kafka:9092' permite que el backend lo encuentre dentro de Docker.
-      # 'localhost:9092' permite que tú lo veas desde afuera.
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9092
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      
-      # Configuración para desarrollo (un solo nodo)
+
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+<<<<<<< ours
+
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+=======
       
       # ID de cluster aleatorio para KRaft
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_SEGMENT_BYTES: 134217728
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
     volumes:
-      - ./kafka_data:/var/lib/kafka/data # Persistencia de mensajes
+      - ./kafka_data:/var/lib/kafka/data
     restart: unless-stopped
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+=======
+    mem_limit: 1024m
+    cpus: 1.0
+>>>>>>> theirs
+=======
+    mem_limit: 1024m
+    cpus: 1.0
+>>>>>>> theirs
+=======
+    mem_limit: 1024m
+    cpus: 1.0
+>>>>>>> theirs
+    networks:
+      - app-network
 
   redis:
     build:
       context: ./redis
       dockerfile: Dockerfile
     container_name: redis_cache
+    mem_limit: 512m
+    mem_reservation: 256m
     ports:
       - "6379:6379"
     volumes:
-      - ./redis_data:/data # Los datos se guardarán en esta carpeta local
+      - ./redis_data:/data
     restart: unless-stopped
-    # Opcional: poner un límite de memoria para que no consuma toda tu RAM
-    deploy:
-      resources:
-        limits:
-          memory: 512M
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+=======
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 384m
+    cpus: 0.5
+>>>>>>> theirs
+=======
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 384m
+    cpus: 0.5
+>>>>>>> theirs
+=======
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 384m
+    cpus: 0.5
+>>>>>>> theirs
+    networks:
+      - app-network
 
   prometheus:
+<<<<<<< ours
+    build:
+      context: ./prometheus
+      dockerfile: Dockerfile
+    container_name: prometheus_db
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+=======
       build:
         context: ./prometheus
         dockerfile: Dockerfile
@@ -82,26 +161,64 @@ services:
         - '--config.file=/etc/prometheus/prometheus.yml'
         - '--storage.tsdb.path=/prometheus'
       restart: unless-stopped
+      mem_limit: 384m
+      cpus: 0.5
       networks:
         - app-network # Es buena práctica que todos estén en la misma red
+>>>>>>> theirs
   grafana:
     build:
       context: ./grafana
       dockerfile: Dockerfile
     container_name: grafana_ui
+    mem_limit: 512m
+    mem_reservation: 256m
     ports:
-      - "3001:3000" # Lo mapeamos al 3001 para no chocar si tienes otro servicio
+      - "3001:3000"
     volumes:
       - ./grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin # Cambia esto en producción
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
     depends_on:
       - prometheus
     restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+<<<<<<< ours
+<<<<<<< ours
     networks:
       - app-network
 
-  networks:
-    app-network:
-      driver: bridge
+<<<<<<< ours
+  ollama:
+    build:
+      context: ./ollama
+      dockerfile: Dockerfile
+    container_name: ollama_server
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: unless-stopped
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+<<<<<<< ours
+<<<<<<< ours
+=======
+networks:
+  app-network:
+    driver: bridge
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs

@@ -1,292 +1,180 @@
-Chatbot RAG Platform
+# Chatbot RAG Platform
 
-Plataforma de chatbot basada en Retrieval Augmented Generation (RAG) para consultar documentos mediante un modelo LLM local.
+## 1) ¿Qué es este proyecto?
 
-La arquitectura utiliza un pipeline distribuido para ingestión de documentos, generación de embeddings y recuperación semántica antes de generar respuestas con un modelo de lenguaje.
+Este repositorio implementa una plataforma **RAG (Retrieval-Augmented Generation)** para consultar documentos empresariales desde una interfaz web.
 
-Arquitectura
-Flujo general
-Usuario
-   │
-   ▼
-Frontend (React + Vite)
-   │
-   ▼
-Nginx (reverse proxy)
-   │
-   ▼
-FastAPI Backend
-   │
-   ├── Upload documentos
-   ├── Consulta preguntas
-   │
-   ▼
-Kafka Event Bus
-   │
-   ├── Parser Worker
-   ├── Embedding Worker
-   │
-   ▼
-ChromaDB (vector store)
-   │
-   ▼
-Recuperación de contexto
-   │
-   ▼
-Ollama (LLM)
-   │
-   ▼
-Respuesta al usuario
+El flujo principal es:
 
-Tecnologías
-Frontend
+1. El usuario sube documentos (`.pdf` y `.md`) desde el frontend.
+2. El backend recibe la carga y publica eventos de procesamiento.
+3. Workers consumen eventos para parsear, chunkear, generar embeddings y guardar en Chroma.
+4. El usuario hace preguntas y recibe avance en tiempo real por **SSE** hasta la respuesta final del LLM.
 
-React
+El objetivo es desacoplar ingestión y consulta usando servicios/eventos para escalar y mantener trazabilidad de cada etapa.
 
-Vite
+---
 
-Interfaz web para:
+## 2) Tecnologías usadas
 
-subir documentos
+### Frontend
+- React + Vite + TypeScript
+- SSE para seguimiento en vivo de procesos (`upload` y `ask`)
 
-hacer preguntas al chatbot
+### Backend
+- FastAPI (API REST)
+- Redis (estado de documentos/consultas y contexto conversacional)
+- Kafka (bus de eventos para el pipeline asíncrono)
+- ChromaDB (almacenamiento vectorial de embeddings)
+- Ollama (generación de respuesta con LLM local)
 
-visualizar respuestas
+### Procesamiento RAG
+- Chunking por tipo de documento (`MarkdownChunker`, `SemanticChunker`)
+- Embeddings con modelo configurable
+- Recuperación híbrida + reranking
+- Filtros por metadatos
 
-Backend
+---
 
-FastAPI
+## 3) Prerrequisitos
 
-Responsabilidades:
+Antes de instalar, asegúrate de tener:
 
-API REST
+- Docker y Docker Compose
+- Node.js 20+ y npm (para desarrollo frontend local)
+- Python 3.11+ (para desarrollo backend local)
+- (Opcional) acceso a GPU si quieres acelerar LLM/embeddings
 
-ingestión de documentos
+---
 
-recuperación de contexto
+## 4) Instalación y ejecución
 
-conexión con el LLM
+## Opción A: con Docker Compose (recomendada)
 
-Endpoints principales:
+1. Clona el repositorio.
+2. Configura variables de entorno (`.env`) para backend/frontend según tu entorno.
+3. Levanta la plataforma:
 
-POST /api/upload
-POST /api/ask
+```bash
+docker compose -f docker_compose.yml up --build
+```
 
-Procesamiento Asíncrono
+4. Verifica servicios:
+   - Backend: `http://localhost:8000`
+   - Frontend: (según configuración de tu contenedor/frontend)
+   - Chroma: `http://localhost:8001`
+   - Grafana: `http://localhost:3001`
+   - Prometheus: `http://localhost:9090`
 
-Apache Kafka
+## Opción B: desarrollo local mixto
 
-Kafka se usa para desacoplar el pipeline de procesamiento:
+### Backend
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
 
-upload → kafka topic → parser worker → embedding worker
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
+---
 
-Ventajas:
+## 5) Endpoints principales
 
-escalabilidad
+### Ingesta de documentos
+- `POST /api/upload`
+- `GET /api/uploads/{batch_id}/status`
+- `GET /api/uploads/{batch_id}/stream` (SSE)
+- `GET /api/documents/{document_id}/status`
 
-resiliencia
+### Consulta RAG
+- `POST /api/ask`
+- `GET /api/queries/{query_id}/status`
+- `GET /api/queries/{query_id}/stream` (SSE)
 
-procesamiento paralelo
+### Contexto de usuario
+- `GET /api/users/{user_id}/state`
+- `GET /api/users/{user_id}/sessions/{session_id}/history`
 
-Vector Store
+---
 
-ChromaDB
+## 6) Diagramas de funcionamiento
 
-Función:
+### 6.1 Arquitectura general
 
-almacenar embeddings
-
-realizar búsqueda semántica
-
-Operaciones principales:
-
-add_documents()
-similarity_search()
-
-Modelo de Lenguaje
-
-Ollama
-
-Se usa para:
-
-generar respuestas
-
-combinar pregunta + contexto recuperado
-
-Ejemplo de modelos posibles:
-
-llama3
-mistral
-phi3
-
-Estado y Cache
-
-Redis
-
-Uso:
-
-almacenamiento temporal
-
-estado compartido
-
-caché de resultados
-
-Observabilidad
-Métricas
-
-Prometheus
-
-Recolecta métricas de:
-
-backend
-
-workers
-
-vector search
-
-Dashboards
-
-Grafana
-
-Visualiza:
-
-latencia
-
-throughput
-
-uso del modelo
-
-Estructura del proyecto
-chatbot/
-
-backend/
- └ app/
-     ├ api/
-     │   ├ ask.py
-     │   └ upload.py
-     │
-     ├ core/
-     │   └ config.py
-     │
-     ├ rag/
-     │   ├ loader.py
-     │   ├ chunker.py
-     │   └ vector_store.py
-     │
-     ├ ingest/
-     │   ├ ingest.py
-     │   ├ rag.py
-     │   └ llm.py
-     │
-     ├ services/
-     │   └ kafka.py
-     │
-     ├ workers/
-     │   ├ parser.py
-     │   └ embeddings.py
-     │
-     └ main.py
-
-frontend/
- └ src/
-     ├ components/
-     ├ App.tsx
-     └ main.tsx
-
-nginx/
-kafka/
-redis/
-chromadb/
-prometheus/
-grafana/
-ollama/
-
-Pipeline RAG
-1️⃣ Ingestión de documentos
-Usuario sube documento
-       │
-       ▼
-FastAPI /upload
-       │
-       ▼
-Kafka topic
-       │
-       ▼
-Parser Worker
-
-
-Se realiza:
-
-lectura del documento
-
-extracción de texto
-
-chunking
-
-2️⃣ Generación de embeddings
-Chunks
-   │
-   ▼
-Embedding Worker
-   │
-   ▼
-Vector Store
-
-
-Se crean embeddings y se almacenan en ChromaDB.
-
-3️⃣ Consulta del usuario
-Pregunta usuario
-      │
-      ▼
-FastAPI /ask
-      │
-      ▼
-embedding de pregunta
-      │
-      ▼
-similarity search
-
-
-Se recuperan los chunks más relevantes.
-
-4️⃣ Generación de respuesta
-Pregunta + contexto
-        │
+```text
+┌───────────────┐
+│   Frontend    │
+│ React + SSE   │
+└───────┬───────┘
+        │ HTTP/SSE
         ▼
-Ollama
-        │
-        ▼
-Respuesta final
+┌───────────────┐      publish/subscribe      ┌───────────────┐
+│    FastAPI    │ ───────────────────────────▶ │     Kafka     │
+│ upload / ask  │                              │ event bus      │
+└───────┬───────┘                              └───────┬───────┘
+        │ set/get status                              │ consume
+        ▼                                             ▼
+┌───────────────┐                              ┌───────────────┐
+│     Redis     │                              │    Workers    │
+│ estado + SSE  │                              │ parser/embed  │
+└───────────────┘                              └───────┬───────┘
+                                                        │
+                                                        ▼
+                                                ┌───────────────┐
+                                                │   ChromaDB    │
+                                                │  embeddings   │
+                                                └───────┬───────┘
+                                                        │ retrieval
+                                                        ▼
+                                                ┌───────────────┐
+                                                │    Ollama     │
+                                                │     LLM       │
+                                                └───────────────┘
+```
 
-Despliegue
+### 6.2 Flujo de upload (asíncrono)
 
-Servicios principales en contenedores:
+```text
+Frontend -> POST /api/upload -> FastAPI
+FastAPI -> Kafka (document.uploaded)
+Parser Worker -> Kafka (document.chunked)
+Embedding Worker -> Chroma (add embeddings)
+Estado por etapa -> Redis
+Frontend escucha -> /api/uploads/{batch_id}/stream
+```
 
-frontend
-nginx
-backend
-kafka
-redis
-chromadb
-ollama
-prometheus
-grafana
+### 6.3 Flujo de pregunta (asíncrono)
 
+```text
+Frontend -> POST /api/ask -> query_id
+Frontend -> SSE /api/queries/{query_id}/stream
+Backend:
+  EMBEDDING_QUERY -> HYBRID_RETRIEVAL -> RERANKING -> PROMPT_BUILD -> GENERATING -> DONE
+Estados -> Redis pub/sub -> SSE al frontend
+```
 
-Se orquestan con:
+---
 
-docker compose
+## 7) Notas operativas
 
-Objetivo del proyecto
-
-Construir una plataforma modular de RAG que permita:
-
-ingestión de documentos
-
-consultas semánticas
-
-modelos LLM locales
-
-arquitectura escalable basada en eventos
+- El sistema está pensado para retroalimentación en vivo por SSE, por eso los endpoints principales de negocio son `upload` y `ask` asíncronos.
+- El procesamiento y la consulta usan servicios desacoplados por eventos (Kafka) y estado compartido (Redis).
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
+=======
+- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
+>>>>>>> theirs
+=======
+- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
+>>>>>>> theirs
+=======
+- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
+>>>>>>> theirs

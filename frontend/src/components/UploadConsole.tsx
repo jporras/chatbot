@@ -8,7 +8,7 @@ type BatchState = {
   items: Record<string, DocumentStatus>;
 };
 
-const ALLOWED_EXTENSIONS = [".pdf", ".md", ".txt"];
+const ALLOWED_EXTENSIONS = [".pdf", ".md"];
 
 function isAllowedFile(file: File): boolean {
   const lower = file.name.toLowerCase();
@@ -46,17 +46,6 @@ export default function UploadConsole() {
       ).length,
     };
   }, [batch]);
-
-  function dedupeFiles(nextFiles: File[]): File[] {
-    const map = new Map<string, File>();
-
-    for (const file of [...files, ...nextFiles]) {
-      const key = `${file.name}-${file.size}-${file.lastModified}`;
-      map.set(key, file);
-    }
-
-    return Array.from(map.values());
-  }
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -230,12 +219,12 @@ export default function UploadConsole() {
             ref={inputRef}
             type="file"
             multiple
-            accept=".pdf,.md,.txt"
+            accept=".pdf,.md"
             className="hidden"
             onChange={(e) => addFiles(e.target.files)}
           />
 
-          <p className="mt-3 text-sm text-slate-400">PDF, MD o TXT</p>
+          <p className="mt-3 text-sm text-slate-400">PDF o MD</p>
         </div>
 
         <div className="mt-4">

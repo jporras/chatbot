@@ -1,28 +1,16 @@
 import { useMemo, useRef, useState } from "react";
-import { uploadSingleDocument, type UploadResponse } from "../lib/api";
+import { uploadDocuments, type UploadResponse } from "../lib/api";
 
-type UploadJob = {
-  localId: string;
-  filename: string;
-  documentId?: string;
-  correlationId?: string;
-  fileVersion?: number;
-  status:
-    | "SELECTED"
-    | "UPLOADING"
-    | "UPLOADED"
-    | "PARSING"
-    | "CHUNKED"
-    | "EMBEDDING"
-    | "INDEXED"
-    | "FAILED";
-  progress: number;
-  stageMessage?: string;
-  error?: string | null;
+type UploadItem = {
+  id: string;
+  file: File;
 };
 
+type UploadResult = UploadResponse & {
+  filename: string;
+};
 
-const ALLOWED_EXTENSIONS = [".pdf", ".md", ".txt"];
+const ALLOWED_EXTENSIONS = [".pdf", ".md"];
 
 function isValidFile(file: File): boolean {
   const name = file.name.toLowerCase();
@@ -43,14 +31,6 @@ export type DocumentStatusResponse = {
   updated_at?: string;
   error?: string | null;
 };
-
-export async function getDocumentStatus(documentId: string) {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/status`);
-  if (!response.ok) {
-    throw new Error("No se pudo consultar el estado del documento.");
-  }
-  return (await response.json()) as DocumentStatusResponse;
-}
 
 export default function UploadForm() {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -96,13 +76,18 @@ export default function UploadForm() {
 
     try {
       for (const item of files) {
-        const response = await uploadSingleDocument({
-          file: item.file,
-          documentId: documentId || undefined,
-        });
+        const batch = await uploadDocuments(
+          [item.file],
+          documentId ? [documentId] : undefined,
+        );
+        const response = batch.items[0];
 
         uploaded.push({
-          ...response,
+          message: "Archivo recibido y encolado para procesamiento",
+          document_id: response.document_id,
+          file_version: response.file_version,
+          correlation_id: response.correlation_id,
+          status: response.status,
           filename: item.file.name,
         });
       }
@@ -125,7 +110,7 @@ export default function UploadForm() {
         </p>
         <h2 className="mt-2 text-3xl font-semibold">Subir documentos al pipeline</h2>
         <p className="mt-3 max-w-2xl text-sm text-slate-400">
-          Envía archivos PDF, Markdown o TXT al backend. Si indicas un{" "}
+          Envía archivos PDF o Markdown al backend. Si indicas un{" "}
           <code className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">
             document_id
           </code>{" "}
@@ -169,7 +154,7 @@ export default function UploadForm() {
             Arrastra tus archivos aquí
           </p>
           <p className="mt-2 text-sm text-slate-400">
-            Se aceptan PDF, MD y TXT.
+            Se aceptan PDF y MD.
           </p>
 
           <button
@@ -184,7 +169,7 @@ export default function UploadForm() {
             ref={inputRef}
             type="file"
             multiple
-            accept=".pdf,.md,.txt"
+            accept=".pdf,.md"
             className="hidden"
             onChange={(e) => appendFiles(e.target.files)}
           />
@@ -210,75 +195,3 @@ export default function UploadForm() {
                   <button
                     type="button"
                     onClick={() => removeFile(item.id)}
-                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
-                  >
-                    Quitar
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-rose-800 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
-            {error}
-          </div>
-        )}
-
-        {results.length > 0 && (
-          <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 p-4">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-300">
-              Subidas realizadas
-            </h3>
-
-            <ul className="mt-4 space-y-3">
-              {results.map((result, index) => (
-                <li
-                  key={`${result.document_id}-${index}`}
-                  className="rounded-xl border border-emerald-900/60 bg-slate-950/50 p-4"
-                >
-                  <p className="font-medium text-slate-100">{result.filename}</p>
-                  <p className="mt-1 text-sm text-slate-300">
-                    document_id:{" "}
-                    <code className="rounded bg-slate-800 px-1.5 py-0.5">
-                      {result.document_id}
-                    </code>
-                  </p>
-                  {typeof result.file_version !== "undefined" && (
-                    <p className="mt-1 text-sm text-slate-300">
-                      versión:{" "}
-                      <code className="rounded bg-slate-800 px-1.5 py-0.5">
-                        {result.file_version}
-                      </code>
-                    </p>
-                  )}
-                  {result.correlation_id && (
-                    <p className="mt-1 text-sm text-slate-400">
-                      correlation_id:{" "}
-                      <code className="rounded bg-slate-800 px-1.5 py-0.5">
-                        {result.correlation_id}
-                      </code>
-                    </p>
-                  )}
-                  <p className="mt-2 text-sm text-emerald-300">{result.message}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={files.length === 0 || isUploading}
-            onClick={handleUpload}
-            className="rounded-xl bg-cyan-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isUploading ? "Subiendo..." : "Enviar al backend"}
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}

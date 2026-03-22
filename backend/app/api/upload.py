@@ -3,7 +3,10 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.config import settings
-from app.schemas.api import UploadAcceptedItem, UploadAcceptedResponse
+from app.schemas.api import (
+    UploadAcceptedItem,
+    UploadAcceptedResponse,
+)
 from app.schemas.events import DocumentUploadedPayload, EventEnvelope
 from app.services.document_registry import DocumentRegistryService
 from app.services.file_storage import FileStorageService
@@ -12,7 +15,7 @@ from app.services.redis_state import RedisStateService
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
-ALLOWED_EXTENSIONS = {".pdf", ".md", ".txt"}
+ALLOWED_EXTENSIONS = {".pdf", ".md"}
 
 
 @router.post("/upload", response_model=UploadAcceptedResponse)

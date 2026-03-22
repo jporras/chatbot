@@ -37,7 +37,12 @@ class Settings(BaseSettings):
 
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    semantic_chunk_size: int = 1200
+    semantic_chunk_overlap_min: int = 80
+    semantic_chunk_overlap_max: int = 260
     retrieval_top_k: int = 5
+    retrieval_candidate_k: int = 12
+    conversation_history_limit: int = 20
 
 
 settings = Settings()

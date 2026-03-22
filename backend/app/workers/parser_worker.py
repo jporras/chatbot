@@ -7,7 +7,7 @@ from uuid import uuid4
 from confluent_kafka import Consumer
 
 from app.core.config import settings
-from app.rag.chunker import MarkdownChunker, TextChunker
+from app.rag.chunker import MarkdownChunker, SemanticChunker
 from app.rag.loader import DocumentLoader
 from app.schemas.events import EventEnvelope
 from app.services.kafka_producer import KafkaProducerService
@@ -31,8 +31,12 @@ def run() -> None:
     producer = KafkaProducerService()
     redis_state = RedisStateService()
     loader = DocumentLoader()
-    text_chunker = TextChunker(settings.chunk_size, settings.chunk_overlap)
     markdown_chunker = MarkdownChunker(settings.chunk_size, settings.chunk_overlap)
+    semantic_chunker = SemanticChunker(
+        chunk_size=settings.semantic_chunk_size,
+        overlap_min=settings.semantic_chunk_overlap_min,
+        overlap_max=settings.semantic_chunk_overlap_max,
+    )
 
     while True:
         msg = consumer.poll(1.0)
@@ -83,7 +87,10 @@ def run() -> None:
                 part_text = part["text"]
                 part_metadata = part.get("metadata", {})
 
-                split_parts = markdown_chunker.split(part_text) if suffix == ".md" else text_chunker.split(part_text)
+                if suffix == ".md":
+                    split_parts = markdown_chunker.split(part_text)
+                else:
+                    split_parts = semantic_chunker.split(part_text)
 
                 for local_chunk_index, chunk in enumerate(split_parts):
                     chunk_text = chunk["text"]

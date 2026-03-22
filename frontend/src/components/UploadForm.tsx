@@ -76,10 +76,7 @@ export default function UploadForm() {
 
     try {
       for (const item of files) {
-        const batch = await uploadDocuments(
-          [item.file],
-          documentId ? [documentId] : undefined,
-        );
+        const batch = await uploadDocuments([item.file], documentId ? [documentId] : undefined);
         const response = batch.items[0];
 
         uploaded.push({
@@ -105,15 +102,11 @@ export default function UploadForm() {
   return (
     <section className="mx-auto max-w-4xl">
       <div className="mb-8">
-        <p className="text-sm uppercase tracking-[0.25em] text-cyan-400">
-          Upload
-        </p>
+        <p className="text-sm uppercase tracking-[0.25em] text-cyan-400">Upload</p>
         <h2 className="mt-2 text-3xl font-semibold">Subir documentos al pipeline</h2>
         <p className="mt-3 max-w-2xl text-sm text-slate-400">
           Envía archivos PDF o Markdown al backend. Si indicas un{" "}
-          <code className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">
-            document_id
-          </code>{" "}
+          <code className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-200">document_id</code>{" "}
           el backend podrá tratarlos como nuevas versiones del mismo documento.
         </p>
       </div>
@@ -145,17 +138,11 @@ export default function UploadForm() {
             appendFiles(e.dataTransfer.files);
           }}
           className={`rounded-2xl border-2 border-dashed p-8 text-center transition ${
-            isDragging
-              ? "border-cyan-500 bg-cyan-500/10"
-              : "border-slate-700 bg-slate-950/70"
+            isDragging ? "border-cyan-500 bg-cyan-500/10" : "border-slate-700 bg-slate-950/70"
           }`}
         >
-          <p className="text-lg font-medium text-slate-100">
-            Arrastra tus archivos aquí
-          </p>
-          <p className="mt-2 text-sm text-slate-400">
-            Se aceptan PDF y MD.
-          </p>
+          <p className="text-lg font-medium text-slate-100">Arrastra tus archivos aquí</p>
+          <p className="mt-2 text-sm text-slate-400">Se aceptan PDF y MD.</p>
 
           <button
             type="button"
@@ -187,11 +174,59 @@ export default function UploadForm() {
                 >
                   <div>
                     <p className="font-medium text-slate-100">{item.file.name}</p>
-                    <p className="text-sm text-slate-400">
-                      {(item.file.size / 1024).toFixed(1)} KB
-                    </p>
+                    <p className="text-sm text-slate-400">{(item.file.size / 1024).toFixed(1)} KB</p>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => removeFile(item.id)}
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
+                  >
+                    Quitar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-rose-800 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={handleUpload}
+            disabled={isUploading || files.length === 0}
+            className="rounded-xl bg-cyan-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUploading ? "Subiendo..." : "Subir"}
+          </button>
+        </div>
+
+        {results.length > 0 && (
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-cyan-400">Resultados</p>
+            <ul className="mt-3 space-y-2">
+              {results.map((result) => (
+                <li
+                  key={`${result.document_id}-${result.filename}`}
+                  className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-200"
+                >
+                  <span className="font-medium">{result.filename}</span>
+                  <span className="mx-2 text-slate-500">•</span>
+                  <span>{result.document_id}</span>
+                  <span className="mx-2 text-slate-500">•</span>
+                  <span>{result.status}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

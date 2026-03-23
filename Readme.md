@@ -1,180 +1,313 @@
 # Chatbot RAG Platform
 
-## 1) ¿Qué es este proyecto?
+Plataforma RAG orientada a documentos empresariales, diseñada como un sistema distribuido de ingesta asincrona, recuperacion hibrida y generacion asistida por LLM. El repositorio no implementa solo una UI de preguntas y respuestas: construye una arquitectura desacoplada con trazabilidad de etapas, versionado documental, procesamiento por eventos, estado en tiempo real y observabilidad operativa.
 
-Este repositorio implementa una plataforma **RAG (Retrieval-Augmented Generation)** para consultar documentos empresariales desde una interfaz web.
+## Resumen Ejecutivo
 
-El flujo principal es:
+Este proyecto demuestra una aproximacion de ingenieria mas cercana a una plataforma que a un monolito CRUD:
 
-1. El usuario sube documentos (`.pdf` y `.md`) desde el frontend.
-2. El backend recibe la carga y publica eventos de procesamiento.
-3. Workers consumen eventos para parsear, chunkear, generar embeddings y guardar en Chroma.
-4. El usuario hace preguntas y recibe avance en tiempo real por **SSE** hasta la respuesta final del LLM.
+- separa ingesta, transformacion, indexacion y consulta en componentes con responsabilidades claras,
+- desacopla la aceptacion de trabajo de su ejecucion intensiva mediante Kafka,
+- usa Redis como store de estado operacional y canal de publicacion para SSE,
+- combina ChromaDB, embeddings y reranking para retrieval de mayor calidad,
+- integra Prometheus y Grafana como parte del sistema, no como un agregado posterior.
 
-El objetivo es desacoplar ingestión y consulta usando servicios/eventos para escalar y mantener trazabilidad de cada etapa.
+El resultado es una base que privilegia trazabilidad, mantenibilidad y capacidad de evolucion.
 
----
+## Que Hace el Sistema
 
-## 2) Tecnologías usadas
+El sistema permite:
+
+- cargar documentos `.pdf` y `.md`,
+- parsearlos y dividirlos en chunks especializados,
+- generar embeddings y persistirlos en ChromaDB,
+- ejecutar consultas RAG con recuperacion hibrida, reranking y generacion con LLM,
+- exponer el avance de ingesta y consulta en tiempo real via SSE,
+- mantener contexto conversacional por usuario y sesion.
+
+## Arquitectura
+
+### Vista General
+
+```text
+                           +----------------------+
+                           |      Frontend        |
+                           | React + Vite + SSE   |
+                           +----------+-----------+
+                                      |
+                                      | HTTP / SSE
+                                      v
+                           +----------------------+
+                           |        Nginx         |
+                           | Reverse Proxy        |
+                           +----+------------+----+
+                                |            |
+                                |            |
+                     +----------v--+      +--v------------------+
+                     |   FastAPI    |      | Observability       |
+                     | API Gateway  |      | Prometheus/Grafana  |
+                     +------+-------+      +---------------------+
+                            |
+                 +----------+-----------+
+                 |                      |
+                 | write/read state     | publish events
+                 v                      v
+         +---------------+      +---------------+
+         |     Redis     |      |     Kafka     |
+         | state + SSE   |      | event backbone|
+         +-------+-------+      +-------+-------+
+                 ^                      |
+                 |                      |
+                 |               consume|
+         +-------+-------+      +-------+--------+
+         | Query Service  |      | Parser Worker  |
+         | Retrieval/RAG  |      | Chunking       |
+         +-------+--------+      +-------+--------+
+                 |                       |
+                 |                       | publish chunked docs
+                 |                       v
+                 |              +-------------------+
+                 |              | Embedding Worker  |
+                 |              | Vector indexing   |
+                 |              +---------+---------+
+                 |                        |
+                 |                        |
+                 v                        v
+          +-------------+         +---------------+
+          |   Ollama    |         |   ChromaDB    |
+          | LLM runtime |         | Vector Store  |
+          +-------------+         +---------------+
+```
+
+### Principios de Diseno
+
+- desacoplamiento por eventos: la ingesta no depende del tiempo de ejecucion del pipeline pesado,
+- responsabilidad unica por servicio: API, chunking, embeddings, almacenamiento y serving viven separados,
+- trazabilidad operativa: cada documento y consulta expone estados intermedios,
+- observabilidad integrada: el pipeline no es una caja negra,
+- evolucion controlada: el sistema admite crecer hacia mas workers, exporters y politicas de retrieval.
+
+## Flujo de Ingesta
+
+### 1. Recepcion
+
+El frontend envia uno o varios archivos al backend.
+
+- endpoint: `POST /api/upload`
+- el backend valida el tipo de archivo,
+- persiste el archivo en almacenamiento local,
+- reserva una nueva version logica del documento,
+- publica un evento `document.uploaded` en Kafka,
+- registra estado inicial en Redis.
+
+### 2. Parsing y Chunking
+
+`parser_worker` consume `document.uploaded`.
+
+- carga el contenido del documento,
+- selecciona la estrategia de chunking:
+  - `MarkdownChunker` para `.md`
+  - `SemanticChunker` para `.pdf`
+- genera chunks con metadata rica para trazabilidad y recuperacion,
+- publica `document.chunked` en Kafka.
+
+### 3. Embeddings e Indexacion
+
+`embedding_worker` consume `document.chunked`.
+
+- genera embeddings con el modelo configurado,
+- inserta chunks, embeddings y metadata en ChromaDB,
+- publica `document.indexed`,
+- actualiza estado final del documento en Redis.
+
+## Flujo de Consulta
+
+### 1. Entrada
+
+- endpoint: `POST /api/ask`
+- el backend crea un `query_id`,
+- la ejecucion real corre en segundo plano,
+- el frontend puede suscribirse al stream de estado.
+
+### 2. Pipeline RAG
+
+La consulta avanza por estas etapas:
+
+1. `EMBEDDING_QUERY`
+2. `HYBRID_RETRIEVAL`
+3. `RERANKING`
+4. `PROMPT_BUILD`
+5. `GENERATING`
+6. `DONE`
+
+### 3. Recuperacion Hibrida
+
+La busqueda combina:
+
+- similitud vectorial en ChromaDB,
+- busqueda por texto,
+- deduplicacion por `chunk_hash`,
+- seleccion de candidatos y reranking posterior.
+
+Esto mejora recall y reduce la fragilidad de depender de una sola tecnica de retrieval.
+
+### 4. Contexto Conversacional
+
+Redis mantiene historial reciente y estado persistente basico por usuario/sesion para:
+
+- reconstruir contexto reciente,
+- conservar continuidad conversacional,
+- enriquecer el prompt sin rehidratar toda la historia desde una capa mas costosa.
+
+## Tiempo Real y UX Operacional
+
+El sistema usa Redis Pub/Sub y SSE para reflejar el avance de procesos largos:
+
+- `GET /api/uploads/{batch_id}/stream`
+- `GET /api/queries/{query_id}/stream`
+
+Esto permite una UX reactiva aun cuando el pipeline interno sigue ejecutandose en segundo plano.
+
+## Observabilidad
+
+La plataforma incluye monitoreo con Prometheus y Grafana.
+
+### Que Se Mide
+
+Se exponen metricas de:
+
+- throughput de uploads,
+- volumen de bytes ingeridos,
+- chunks generados por estrategia,
+- batches de embeddings,
+- latencia total de consultas,
+- latencia por etapa del pipeline RAG,
+- latencia por etapa de ingesta,
+- fallos por etapa,
+- memoria RSS por proceso,
+- consumo de CPU por servicio.
+
+### Targets Scrapeados
+
+Prometheus recolecta metricas de:
+
+- `backend:8000/metrics`
+- `parser:9101/metrics`
+- `embedding:9102/metrics`
+- `prometheus:9090/metrics`
+
+### Grafana
+
+Grafana queda aprovisionado con:
+
+- un datasource de Prometheus,
+- un dashboard inicial llamado `Chatbot RAG Observability`.
+
+### Limite Actual
+
+El dashboard incluye metricas de proceso Python y metricas de negocio del pipeline. Si se desea monitoreo mas profundo de host, contenedores, disco o red, el siguiente paso natural es agregar exporters como `node-exporter`, `cAdvisor`, `redis-exporter` y exporters para Kafka.
+
+## Stack Tecnologico
 
 ### Frontend
-- React + Vite + TypeScript
-- SSE para seguimiento en vivo de procesos (`upload` y `ask`)
 
-### Backend
-- FastAPI (API REST)
-- Redis (estado de documentos/consultas y contexto conversacional)
-- Kafka (bus de eventos para el pipeline asíncrono)
-- ChromaDB (almacenamiento vectorial de embeddings)
-- Ollama (generación de respuesta con LLM local)
+- React
+- Vite
+- TypeScript
+- SSE
 
-### Procesamiento RAG
-- Chunking por tipo de documento (`MarkdownChunker`, `SemanticChunker`)
-- Embeddings con modelo configurable
-- Recuperación híbrida + reranking
-- Filtros por metadatos
+### Backend y Pipeline
 
----
+- FastAPI
+- Kafka
+- Redis
+- ChromaDB
+- Sentence Transformers
+- Ollama
 
-## 3) Prerrequisitos
+### Plataforma y Operacion
 
-Antes de instalar, asegúrate de tener:
+- Docker Compose
+- Nginx
+- Prometheus
+- Grafana
 
-- Docker y Docker Compose
-- Node.js 20+ y npm (para desarrollo frontend local)
-- Python 3.11+ (para desarrollo backend local)
-- (Opcional) acceso a GPU si quieres acelerar LLM/embeddings
+## Estructura de Servicios
 
----
+- `backend`: API principal y orquestacion sincronica de consultas.
+- `parser`: procesamiento documental y chunking.
+- `embedding`: generacion de embeddings e indexacion vectorial.
+- `frontend`: interfaz web.
+- `nginx`: reverse proxy y punto unico de entrada.
+- `redis`: estado rapido, pub/sub y contexto.
+- `kafka`: backbone de eventos.
+- `chroma`: persistencia vectorial.
+- `ollama`: inferencia local del LLM.
+- `prometheus`: recoleccion de metricas.
+- `grafana`: visualizacion y analisis operativo.
 
-## 4) Instalación y ejecución
-
-## Opción A: con Docker Compose (recomendada)
-
-1. Clona el repositorio.
-2. Configura variables de entorno (`.env`) para backend/frontend según tu entorno.
-3. Levanta la plataforma:
+## Ejecucion con Docker Compose
 
 ```bash
-docker compose -f docker_compose.yml up --build
+docker compose up --build
 ```
 
-4. Verifica servicios:
-   - Backend: `http://localhost:8000`
-   - Frontend: (según configuración de tu contenedor/frontend)
-   - Chroma: `http://localhost:8001`
-   - Grafana: `http://localhost:3001`
-   - Prometheus: `http://localhost:9090`
+## URLs Principales
 
-## Opción B: desarrollo local mixto
+Con la configuracion actual del repositorio:
 
-### Backend
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
+- aplicacion: `http://localhost/`
+- API docs: `http://localhost/docs`
+- backend metrics: `http://localhost/metrics`
+- Grafana: `http://localhost/grafana/`
+- Prometheus: `http://localhost/prometheus/`
 
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## Credenciales de Grafana
 
----
+- usuario: `admin`
+- password: `admin`
 
-## 5) Endpoints principales
+## Endpoints Relevantes
 
-### Ingesta de documentos
+### Ingesta
+
 - `POST /api/upload`
 - `GET /api/uploads/{batch_id}/status`
-- `GET /api/uploads/{batch_id}/stream` (SSE)
+- `GET /api/uploads/{batch_id}/stream`
 - `GET /api/documents/{document_id}/status`
 
-### Consulta RAG
+### Consulta
+
 - `POST /api/ask`
 - `GET /api/queries/{query_id}/status`
-- `GET /api/queries/{query_id}/stream` (SSE)
+- `GET /api/queries/{query_id}/stream`
 
-### Contexto de usuario
+### Conversacion
+
 - `GET /api/users/{user_id}/state`
 - `GET /api/users/{user_id}/sessions/{session_id}/history`
 
----
+## Senales de Ingenieria que Este Proyecto Demuestra
 
-## 6) Diagramas de funcionamiento
+Para un reclutador o un ingeniero senior revisando el repositorio, este proyecto evidencia:
 
-### 6.1 Arquitectura general
+- diseno orientado a servicios y eventos en lugar de flujo lineal acoplado,
+- separacion entre aceptacion de trabajo y ejecucion intensiva,
+- versionado documental y metadatos orientados a trazabilidad,
+- observabilidad desde el diseno y no como parche posterior,
+- capacidad de streaming de estado para experiencias reactivas,
+- retrieval hibrido y reranking en vez de un RAG ingenuo de una sola etapa,
+- base apta para evolucionar hacia multi-worker, multi-model o despliegues mas productivos.
 
-```text
-┌───────────────┐
-│   Frontend    │
-│ React + SSE   │
-└───────┬───────┘
-        │ HTTP/SSE
-        ▼
-┌───────────────┐      publish/subscribe      ┌───────────────┐
-│    FastAPI    │ ───────────────────────────▶ │     Kafka     │
-│ upload / ask  │                              │ event bus      │
-└───────┬───────┘                              └───────┬───────┘
-        │ set/get status                              │ consume
-        ▼                                             ▼
-┌───────────────┐                              ┌───────────────┐
-│     Redis     │                              │    Workers    │
-│ estado + SSE  │                              │ parser/embed  │
-└───────────────┘                              └───────┬───────┘
-                                                        │
-                                                        ▼
-                                                ┌───────────────┐
-                                                │   ChromaDB    │
-                                                │  embeddings   │
-                                                └───────┬───────┘
-                                                        │ retrieval
-                                                        ▼
-                                                ┌───────────────┐
-                                                │    Ollama     │
-                                                │     LLM       │
-                                                └───────────────┘
-```
+## Proximas Evoluciones Naturales
 
-### 6.2 Flujo de upload (asíncrono)
+- agregar exporters de infraestructura para Docker y host,
+- persistir alertas y reglas en Prometheus,
+- introducir retries y DLQ para eventos fallidos,
+- mover de hilos locales a un ejecutor de trabajos mas robusto para consultas,
+- versionar prompts y politicas de retrieval,
+- incorporar autenticacion y multitenancy.
 
-```text
-Frontend -> POST /api/upload -> FastAPI
-FastAPI -> Kafka (document.uploaded)
-Parser Worker -> Kafka (document.chunked)
-Embedding Worker -> Chroma (add embeddings)
-Estado por etapa -> Redis
-Frontend escucha -> /api/uploads/{batch_id}/stream
-```
+## Conclusion
 
-### 6.3 Flujo de pregunta (asíncrono)
-
-```text
-Frontend -> POST /api/ask -> query_id
-Frontend -> SSE /api/queries/{query_id}/stream
-Backend:
-  EMBEDDING_QUERY -> HYBRID_RETRIEVAL -> RERANKING -> PROMPT_BUILD -> GENERATING -> DONE
-Estados -> Redis pub/sub -> SSE al frontend
-```
-
----
-
-## 7) Notas operativas
-
-- El sistema está pensado para retroalimentación en vivo por SSE, por eso los endpoints principales de negocio son `upload` y `ask` asíncronos.
-- El procesamiento y la consulta usan servicios desacoplados por eventos (Kafka) y estado compartido (Redis).
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
-=======
-- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
->>>>>>> theirs
-=======
-- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
->>>>>>> theirs
-=======
-- Los embeddings se almacenan en Chroma para recuperación semántica y filtros por metadatos.
->>>>>>> theirs
+La propuesta va mas alla de “subir documentos y preguntarle a un modelo”. Se trata de una plataforma RAG con pipeline observable, componentes especializados y una arquitectura con criterios claros de desacoplamiento, mantenibilidad y capacidad de evolucion: justo el tipo de senal que suele separar un prototipo funcional de una pieza de ingenieria seria.

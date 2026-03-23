@@ -2,15 +2,18 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: 'prometheus'
+  - job_name: "prometheus"
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ["localhost:9090"]
 
-  - job_name: 'fastapi-backend'
+  - job_name: "fastapi-backend"
     static_configs:
-      - targets: ['backend:8000']
+      - targets: ["backend:8000"]
 
-  # Si agregas exporters para Redis o Kafka, los pondrías aquí:
-  # - job_name: 'redis'
-  #   static_configs:
-  #     - targets: ['redis-exporter:9121']
+  - job_name: "parser-worker"
+    static_configs:
+      - targets: ["parser:9101"]
+
+  - job_name: "embedding-worker"
+    static_configs:
+      - targets: ["embedding:9102"]

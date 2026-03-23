@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     pipeline_version: str = "v1"
 
     upload_dir: str = "/app/uploads"
+    parser_metrics_port: int = 9101
+    embedding_metrics_port: int = 9102
 
     # ========================
     # KAFKA

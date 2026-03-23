@@ -1,8 +1,10 @@
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.config import settings
+from app.monitoring.metrics import record_upload
 from app.schemas.api import (
     UploadAcceptedItem,
     UploadAcceptedResponse,
@@ -50,6 +52,7 @@ async def upload_documents(
 
         logical_document_id = provided_document_ids[index] if provided_document_ids else str(uuid4())
         _, path, content_hash = await storage.save_upload(file)
+        size_bytes = Path(path).stat().st_size
         file_version = registry.reserve_next_version(logical_document_id)
         registry.set_current_hash(logical_document_id, file_version, content_hash)
         correlation_id = str(uuid4())
@@ -86,6 +89,7 @@ async def upload_documents(
             event.model_dump(mode="json"),
             key=logical_document_id,
         )
+        record_upload(suffix, size_bytes)
 
         accepted_items.append(
             UploadAcceptedItem(

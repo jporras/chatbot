@@ -7,6 +7,13 @@ from uuid import uuid4
 from confluent_kafka import Consumer
 
 from app.core.config import settings
+from app.monitoring.metrics import (
+    record_chunks_generated,
+    record_pipeline_document,
+    record_pipeline_failure,
+    start_worker_metrics_server,
+    track_pipeline_stage,
+)
 from app.rag.chunker import MarkdownChunker, SemanticChunker
 from app.rag.loader import DocumentLoader
 from app.schemas.events import EventEnvelope
@@ -19,6 +26,7 @@ def sha256_text(text: str) -> str:
 
 
 def run() -> None:
+    start_worker_metrics_server(settings.parser_metrics_port)
     consumer = Consumer(
         {
             "bootstrap.servers": settings.kafka_bootstrap_servers,
@@ -55,6 +63,8 @@ def run() -> None:
         path = payload["path"]
         content_hash = payload["content_hash"]
         correlation_id = event["correlation_id"]
+        document_type = Path(path).suffix.lower().lstrip(".") or "unknown"
+        strategy = "markdown" if document_type == "md" else "semantic"
 
         try:
             redis_state.set_document_status(
@@ -67,7 +77,8 @@ def run() -> None:
                 stage_message="Extrayendo texto del documento",
             )
 
-            loaded_parts = loader.load(path)
+            with track_pipeline_stage("parser", "load_document", document_type):
+                loaded_parts = loader.load(path)
             suffix = Path(path).suffix.lower()
 
             chunks: list[dict] = []
@@ -83,43 +94,44 @@ def run() -> None:
                 stage_message="Generando chunks del documento",
             )
 
-            for part_index, part in enumerate(loaded_parts):
-                part_text = part["text"]
-                part_metadata = part.get("metadata", {})
+            with track_pipeline_stage("parser", "chunk_document", document_type):
+                for part_index, part in enumerate(loaded_parts):
+                    part_text = part["text"]
+                    part_metadata = part.get("metadata", {})
 
-                if suffix == ".md":
-                    split_parts = markdown_chunker.split(part_text)
-                else:
-                    split_parts = semantic_chunker.split(part_text)
+                    if suffix == ".md":
+                        split_parts = markdown_chunker.split(part_text)
+                    else:
+                        split_parts = semantic_chunker.split(part_text)
 
-                for local_chunk_index, chunk in enumerate(split_parts):
-                    chunk_text = chunk["text"]
-                    merged_metadata = {
-                        "document_id": document_id,
-                        "file_version": file_version,
-                        "is_latest": True,
-                        "filename": filename,
-                        "source": path,
-                        "content_hash": content_hash,
-                        "chunk_hash": sha256_text(chunk_text),
-                        "part_index": part_index,
-                        "chunk_index": global_chunk_index,
-                        "local_chunk_index": local_chunk_index,
-                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                        "pipeline_version": settings.pipeline_version,
-                        "rag_model": settings.rag_model,
-                        **part_metadata,
-                        **chunk.get("metadata", {}),
-                    }
-                    chunks.append(
-                        {
-                            "chunk_id": str(uuid4()),
+                    for local_chunk_index, chunk in enumerate(split_parts):
+                        chunk_text = chunk["text"]
+                        merged_metadata = {
+                            "document_id": document_id,
+                            "file_version": file_version,
+                            "is_latest": True,
+                            "filename": filename,
+                            "source": path,
+                            "content_hash": content_hash,
+                            "chunk_hash": sha256_text(chunk_text),
+                            "part_index": part_index,
                             "chunk_index": global_chunk_index,
-                            "text": chunk_text,
-                            "metadata": merged_metadata,
+                            "local_chunk_index": local_chunk_index,
+                            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                            "pipeline_version": settings.pipeline_version,
+                            "rag_model": settings.rag_model,
+                            **part_metadata,
+                            **chunk.get("metadata", {}),
                         }
-                    )
-                    global_chunk_index += 1
+                        chunks.append(
+                            {
+                                "chunk_id": str(uuid4()),
+                                "chunk_index": global_chunk_index,
+                                "text": chunk_text,
+                                "metadata": merged_metadata,
+                            }
+                        )
+                        global_chunk_index += 1
 
             chunked_event = EventEnvelope(
                 event_type="document.chunked",
@@ -134,11 +146,12 @@ def run() -> None:
                     "chunks": chunks,
                 },
             )
-            producer.publish(
-                settings.kafka_topic_chunked,
-                chunked_event.model_dump(mode="json"),
-                key=document_id,
-            )
+            with track_pipeline_stage("parser", "publish_chunked_event", document_type):
+                producer.publish(
+                    settings.kafka_topic_chunked,
+                    chunked_event.model_dump(mode="json"),
+                    key=document_id,
+                )
 
             redis_state.set_document_status(
                 document_id,
@@ -149,8 +162,12 @@ def run() -> None:
                 progress=60,
                 stage_message=f"Chunks listos: {len(chunks)}",
             )
+            record_chunks_generated(strategy, document_type, len(chunks))
+            record_pipeline_document("parser", "success", document_type)
 
         except Exception as exc:
+            record_pipeline_failure("parser_worker")
+            record_pipeline_document("parser", "failed", document_type)
             producer.publish(
                 settings.kafka_topic_failed,
                 EventEnvelope(

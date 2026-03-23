@@ -1,6 +1,6 @@
 import { useState } from "react";
-import UploadForm from "./components/UploadForm";
 import AskForm from "./components/AskForm";
+import UploadConsole from "./components/UploadConsole";
 
 type View = "upload" | "chat";
 
@@ -49,7 +49,7 @@ export default function App() {
         </aside>
 
         <main className="flex-1 p-6 md:p-10">
-          {view === "upload" ? <UploadForm /> : <AskForm />}
+          {view === "upload" ? <UploadConsole /> : <AskForm />}
         </main>
       </div>
     </div>

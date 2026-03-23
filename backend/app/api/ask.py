@@ -20,9 +20,14 @@ def _run_query(
     session_id: str,
     metadata_filter: dict | None,
 ):
-    service = QueryService()
     state = RedisStateService()
     try:
+        state.publish_query_event(query_id, {
+            "status": "INITIALIZING",
+            "progress": 1,
+            "message": "Inicializando motor de consulta",
+        })
+        service = QueryService()
         service.ask(
             query_id,
             question,

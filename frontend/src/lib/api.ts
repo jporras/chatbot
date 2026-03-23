@@ -79,7 +79,7 @@ export async function uploadDocuments(
     formData.append("document_ids", documentIds.join(","));
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/upload`, {
+  const response = await fetch(`${API_BASE_URL}/upload`, {
     method: "POST",
     body: formData,
   });
@@ -104,7 +104,7 @@ export async function askQuestion(params: {
   userId?: string;
   sessionId?: string;
 }): Promise<AskAcceptedResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/ask`, {
+  const response = await fetch(`${API_BASE_URL}/ask`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

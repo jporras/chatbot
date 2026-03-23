@@ -119,3 +119,6 @@ def run() -> None:
                 stage_message="Falló la generación de embeddings",
                 error=str(exc),
             )
+
+if __name__ == "__main__":
+    run()

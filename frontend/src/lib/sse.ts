@@ -8,7 +8,7 @@ export function streamBatch(
     onError?: () => void;
   },
 ) {
-  const source = new EventSource(`${API_BASE_URL}/api/uploads/${batchId}/stream`);
+  const source = new EventSource(`${API_BASE_URL}/uploads/${batchId}/stream`);
 
   source.addEventListener("snapshot", (event) => {
     handlers.onSnapshot?.(JSON.parse((event as MessageEvent).data));
@@ -30,7 +30,7 @@ export function streamQuery(
     onError?: () => void;
   },
 ) {
-  const source = new EventSource(`${API_BASE_URL}/api/queries/${queryId}/stream`);
+  const source = new EventSource(`${API_BASE_URL}/queries/${queryId}/stream`);
 
   source.addEventListener("snapshot", (event) => {
     handlers.onSnapshot?.(JSON.parse((event as MessageEvent).data));

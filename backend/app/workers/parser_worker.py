@@ -177,3 +177,6 @@ def run() -> None:
                 stage_message="Falló el parsing",
                 error=str(exc),
             )
+
+if __name__ == "__main__":
+    run()

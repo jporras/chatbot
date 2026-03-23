@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     pipeline_version: str = "v1"
 
-    upload_dir: str = "uploads"
+    upload_dir: str = "/app/uploads"
 
     # ========================
     # KAFKA
@@ -72,5 +72,11 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.app_env == "dev"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
 
 settings = get_settings()

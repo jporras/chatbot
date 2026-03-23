@@ -13,6 +13,7 @@ export default function AskForm() {
   const [error, setError] = useState<string | null>(null);
   const [stageMessage, setStageMessage] = useState<string | null>(null);
   const queryStreamRef = useRef<EventSource | null>(null);
+  const completedQueryRef = useRef<string | null>(null);
 
   async function handleAsk() {
     const trimmed = question.trim();
@@ -29,44 +30,47 @@ export default function AskForm() {
         queryStreamRef.current.close();
         queryStreamRef.current = null;
       }
+      completedQueryRef.current = null;
       const accepted = await askQuestion({ question: trimmed });
       setStageMessage(`Consulta encolada (${accepted.query_id})`);
+
+      const finalizeQuery = (data: {
+        status?: string;
+        answer?: string;
+        sources?: AskResponse["sources"];
+      }) => {
+        if (completedQueryRef.current === accepted.query_id) {
+          return;
+        }
+
+        completedQueryRef.current = accepted.query_id;
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            text: data.answer ?? "",
+            sources: data.sources,
+          },
+        ]);
+        setStageMessage("Respuesta lista");
+        setIsLoading(false);
+        source.close();
+        queryStreamRef.current = null;
+      };
 
       const source = streamQuery(accepted.query_id, {
         onSnapshot: (payload) => {
           const data = payload as { status?: string; message?: string; answer?: string; sources?: AskResponse["sources"] };
           if (data.message) setStageMessage(data.message);
           if (data.status === "DONE" && data.answer) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                text: data.answer ?? "",
-                sources: data.sources,
-              },
-            ]);
-            setStageMessage("Respuesta lista");
-            setIsLoading(false);
-            source.close();
-            queryStreamRef.current = null;
+            finalizeQuery(data);
           }
         },
         onQueryStatus: (payload) => {
           const data = payload as { status?: string; message?: string; answer?: string; sources?: AskResponse["sources"] };
           if (data.message) setStageMessage(data.message);
           if (data.status === "DONE" && data.answer) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                text: data.answer ?? "",
-                sources: data.sources,
-              },
-            ]);
-            setStageMessage("Respuesta lista");
-            setIsLoading(false);
-            source.close();
-            queryStreamRef.current = null;
+            finalizeQuery(data);
           }
           if (data.status === "FAILED") {
             setError(data.message ?? "La consulta falló en backend.");
@@ -77,9 +81,12 @@ export default function AskForm() {
         },
         onError: () => {
           setError("Se perdió la conexión SSE con la consulta.");
-          setIsLoading(false);
-          source.close();
-          queryStreamRef.current = null;
+          if (completedQueryRef.current === accepted.query_id) {
+            source.close();
+            queryStreamRef.current = null;
+            return;
+          }
+          setStageMessage("Reconectando al canal de progreso...");
         },
       });
 

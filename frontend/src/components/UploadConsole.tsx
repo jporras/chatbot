@@ -25,6 +25,7 @@ function formatBytes(bytes: number): string {
 export default function UploadConsole() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const batchStreamRef = useRef<EventSource | null>(null);
+  const batchCompletedRef = useRef(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const [documentIdsText, setDocumentIdsText] = useState("");
@@ -117,6 +118,7 @@ export default function UploadConsole() {
         batchStreamRef.current.close();
         batchStreamRef.current = null;
       }
+      batchCompletedRef.current = false;
 
       const result = await uploadDocuments(files, documentIds);
 
@@ -147,12 +149,15 @@ export default function UploadConsole() {
             items: DocumentStatus[];
           };
 
-          setBatch({
+          setBatch((prev) => ({
             batchId: snapshot.batch_id,
-            items: Object.fromEntries(
-              snapshot.items.map((item) => [item.document_id, item]),
-            ),
-          });
+            items: {
+              ...(prev?.batchId === snapshot.batch_id ? prev.items : {}),
+              ...Object.fromEntries(
+                snapshot.items.map((item) => [item.document_id, item]),
+              ),
+            },
+          }));
         },
         onDocumentStatus: (payload) => {
           const item = payload as DocumentStatus;
@@ -160,12 +165,17 @@ export default function UploadConsole() {
           setBatch((prev) => {
             if (!prev) return prev;
 
+            const nextItems = {
+              ...prev.items,
+              [item.document_id]: item,
+            };
+            batchCompletedRef.current = Object.values(nextItems).every((entry) =>
+              ["INDEXED", "FAILED"].includes(entry.status),
+            );
+
             return {
               ...prev,
-              items: {
-                ...prev.items,
-                [item.document_id]: item,
-              },
+              items: nextItems,
             };
           });
         },
@@ -173,8 +183,11 @@ export default function UploadConsole() {
           setError(
             "Se perdió la conexión en tiempo real del lote. Recarga la página o vuelve a subir si necesitas retomar el seguimiento.",
           );
-          source.close();
-          batchStreamRef.current = null;
+          if (batchCompletedRef.current) {
+            source.close();
+            batchStreamRef.current = null;
+            return;
+          }
         },
       });
 

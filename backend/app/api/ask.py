@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from app.schemas.api import AskAcceptedResponse, AskRequest
 from app.services.query_service import QueryService
 from app.services.redis_state import RedisStateService
-from app.services.sse import redis_pubsub_stream, sse_format
+from app.services.sse import redis_pubsub_stream, sse_comment, sse_format
 
 router = APIRouter(prefix="/api", tags=["ask"])
 
@@ -79,6 +79,17 @@ async def stream_query(query_id: str):
         if current:
             yield sse_format("snapshot", current)
         async for event in redis_pubsub_stream(f"stream:query:{query_id}"):
+            if event["event"] == "heartbeat":
+                yield sse_comment()
+                continue
             yield sse_format("query_status", event["data"])
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

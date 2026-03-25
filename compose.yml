@@ -1,0 +1,167 @@
+services:
+
+  backend:
+    build:
+      context: ./backend
+    container_name: backend_api
+    mem_limit: 2g
+    depends_on:
+      - chroma
+      - redis
+      - kafka
+      - ollama
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+    volumes:
+    - ./backend/uploads:/app/uploads
+    networks:
+      - app-network
+
+  parser:
+    build:
+      context: ./backend
+    container_name: parser_worker
+    command: python -m app.workers.parser_worker
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - kafka
+      - redis
+      - chroma
+    restart: unless-stopped
+    volumes:
+    - ./backend/uploads:/app/uploads
+    networks:
+      - app-network
+
+  embedding:
+    build:
+      context: ./backend
+    container_name: embedding_worker
+    command: python -m app.workers.embedding_worker
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - kafka
+      - redis
+      - chroma
+    restart: unless-stopped
+    volumes:
+    - ./backend/uploads:/app/uploads
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: frontend_ui
+    mem_limit: 384m
+    depends_on:
+      - backend
+    env_file:
+      - ./frontend/.env
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: nginx_gateway
+    mem_limit: 128m
+    cpus: 0.2
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  chroma:
+    build:
+      context: ./chromadb
+    container_name: chromadb
+    mem_limit: 768m
+    volumes:
+      - ./chromadb/data:/chroma/chroma
+    env_file:
+      - ./chromadb/.env
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  kafka:
+    build:
+      context: ./kafka
+    container_name: kafka_broker
+    mem_limit: 768m
+    env_file:
+      - ./kafka/.env
+    volumes:
+      - ./kafka/data:/var/lib/kafka/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  redis:
+    build:
+      context: ./redis
+    container_name: redis_cache
+    mem_limit: 256m
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - ./redis/data:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  prometheus:
+    build:
+      context: ./prometheus
+    container_name: prometheus_db
+    mem_limit: 256m
+    cpus: 0.3
+    volumes:
+      - ./prometheus/data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  grafana:
+    build:
+      context: ./grafana
+    container_name: grafana_ui
+    mem_limit: 256m
+    cpus: 0.3
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+    env_file:
+      - ./grafana/.env
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  ollama:
+    build:
+      context: ./ollama
+    container_name: ollama_server
+    mem_limit: 4g
+    env_file:
+      - ./ollama/.env
+    volumes:
+      - ./ollama/data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

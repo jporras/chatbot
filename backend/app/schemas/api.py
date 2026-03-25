@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
+    user_id: str = "anonymous"
+    session_id: str | None = None
+    metadata_filter: dict[str, Any] | None = None
 
 
 class AskAcceptedResponse(BaseModel):

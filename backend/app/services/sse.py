@@ -20,6 +20,11 @@ async def redis_pubsub_stream(channel: str) -> AsyncIterator[dict]:
                     "event": "message",
                     "data": message["data"],
                 }
+            else:
+                yield {
+                    "event": "heartbeat",
+                    "data": "",
+                }
             await asyncio.sleep(0.5)
     finally:
         pubsub.close()
@@ -29,3 +34,7 @@ async def redis_pubsub_stream(channel: str) -> AsyncIterator[dict]:
 def sse_format(event: str, data: dict | list | str) -> str:
     payload = data if isinstance(data, str) else json.dumps(data, default=str)
     return f"event: {event}\ndata: {payload}\n\n"
+
+
+def sse_comment(comment: str = "keepalive") -> str:
+    return f": {comment}\n\n"

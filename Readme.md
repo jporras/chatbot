@@ -1,292 +1,313 @@
-Chatbot RAG Platform
+# Chatbot RAG Platform
+
+Plataforma RAG orientada a documentos empresariales, diseñada como un sistema distribuido de ingesta asincrona, recuperacion hibrida y generacion asistida por LLM. El repositorio no implementa solo una UI de preguntas y respuestas: construye una arquitectura desacoplada con trazabilidad de etapas, versionado documental, procesamiento por eventos, estado en tiempo real y observabilidad operativa.
+
+## Resumen Ejecutivo
+
+Este proyecto demuestra una aproximacion de ingenieria mas cercana a una plataforma que a un monolito CRUD:
+
+- separa ingesta, transformacion, indexacion y consulta en componentes con responsabilidades claras,
+- desacopla la aceptacion de trabajo de su ejecucion intensiva mediante Kafka,
+- usa Redis como store de estado operacional y canal de publicacion para SSE,
+- combina ChromaDB, embeddings y reranking para retrieval de mayor calidad,
+- integra Prometheus y Grafana como parte del sistema, no como un agregado posterior.
+
+El resultado es una base que privilegia trazabilidad, mantenibilidad y capacidad de evolucion.
+
+## Que Hace el Sistema
+
+El sistema permite:
+
+- cargar documentos `.pdf` y `.md`,
+- parsearlos y dividirlos en chunks especializados,
+- generar embeddings y persistirlos en ChromaDB,
+- ejecutar consultas RAG con recuperacion hibrida, reranking y generacion con LLM,
+- exponer el avance de ingesta y consulta en tiempo real via SSE,
+- mantener contexto conversacional por usuario y sesion.
+
+## Arquitectura
+
+### Vista General
+
+```text
+                           +----------------------+
+                           |      Frontend        |
+                           | React + Vite + SSE   |
+                           +----------+-----------+
+                                      |
+                                      | HTTP / SSE
+                                      v
+                           +----------------------+
+                           |        Nginx         |
+                           | Reverse Proxy        |
+                           +----+------------+----+
+                                |            |
+                                |            |
+                     +----------v--+      +--v------------------+
+                     |   FastAPI    |      | Observability       |
+                     | API Gateway  |      | Prometheus/Grafana  |
+                     +------+-------+      +---------------------+
+                            |
+                 +----------+-----------+
+                 |                      |
+                 | write/read state     | publish events
+                 v                      v
+         +---------------+      +---------------+
+         |     Redis     |      |     Kafka     |
+         | state + SSE   |      | event backbone|
+         +-------+-------+      +-------+-------+
+                 ^                      |
+                 |                      |
+                 |               consume|
+         +-------+-------+      +-------+--------+
+         | Query Service  |      | Parser Worker  |
+         | Retrieval/RAG  |      | Chunking       |
+         +-------+--------+      +-------+--------+
+                 |                       |
+                 |                       | publish chunked docs
+                 |                       v
+                 |              +-------------------+
+                 |              | Embedding Worker  |
+                 |              | Vector indexing   |
+                 |              +---------+---------+
+                 |                        |
+                 |                        |
+                 v                        v
+          +-------------+         +---------------+
+          |   Ollama    |         |   ChromaDB    |
+          | LLM runtime |         | Vector Store  |
+          +-------------+         +---------------+
+```
 
-Plataforma de chatbot basada en Retrieval Augmented Generation (RAG) para consultar documentos mediante un modelo LLM local.
+### Principios de Diseno
+
+- desacoplamiento por eventos: la ingesta no depende del tiempo de ejecucion del pipeline pesado,
+- responsabilidad unica por servicio: API, chunking, embeddings, almacenamiento y serving viven separados,
+- trazabilidad operativa: cada documento y consulta expone estados intermedios,
+- observabilidad integrada: el pipeline no es una caja negra,
+- evolucion controlada: el sistema admite crecer hacia mas workers, exporters y politicas de retrieval.
+
+## Flujo de Ingesta
+
+### 1. Recepcion
+
+El frontend envia uno o varios archivos al backend.
+
+- endpoint: `POST /api/upload`
+- el backend valida el tipo de archivo,
+- persiste el archivo en almacenamiento local,
+- reserva una nueva version logica del documento,
+- publica un evento `document.uploaded` en Kafka,
+- registra estado inicial en Redis.
 
-La arquitectura utiliza un pipeline distribuido para ingestión de documentos, generación de embeddings y recuperación semántica antes de generar respuestas con un modelo de lenguaje.
+### 2. Parsing y Chunking
 
-Arquitectura
-Flujo general
-Usuario
-   │
-   ▼
-Frontend (React + Vite)
-   │
-   ▼
-Nginx (reverse proxy)
-   │
-   ▼
-FastAPI Backend
-   │
-   ├── Upload documentos
-   ├── Consulta preguntas
-   │
-   ▼
-Kafka Event Bus
-   │
-   ├── Parser Worker
-   ├── Embedding Worker
-   │
-   ▼
-ChromaDB (vector store)
-   │
-   ▼
-Recuperación de contexto
-   │
-   ▼
-Ollama (LLM)
-   │
-   ▼
-Respuesta al usuario
+`parser_worker` consume `document.uploaded`.
 
-Tecnologías
-Frontend
+- carga el contenido del documento,
+- selecciona la estrategia de chunking:
+  - `MarkdownChunker` para `.md`
+  - `SemanticChunker` para `.pdf`
+- genera chunks con metadata rica para trazabilidad y recuperacion,
+- publica `document.chunked` en Kafka.
 
-React
+### 3. Embeddings e Indexacion
 
-Vite
+`embedding_worker` consume `document.chunked`.
 
-Interfaz web para:
+- genera embeddings con el modelo configurado,
+- inserta chunks, embeddings y metadata en ChromaDB,
+- publica `document.indexed`,
+- actualiza estado final del documento en Redis.
 
-subir documentos
+## Flujo de Consulta
 
-hacer preguntas al chatbot
+### 1. Entrada
 
-visualizar respuestas
+- endpoint: `POST /api/ask`
+- el backend crea un `query_id`,
+- la ejecucion real corre en segundo plano,
+- el frontend puede suscribirse al stream de estado.
 
-Backend
+### 2. Pipeline RAG
 
-FastAPI
+La consulta avanza por estas etapas:
 
-Responsabilidades:
+1. `EMBEDDING_QUERY`
+2. `HYBRID_RETRIEVAL`
+3. `RERANKING`
+4. `PROMPT_BUILD`
+5. `GENERATING`
+6. `DONE`
 
-API REST
+### 3. Recuperacion Hibrida
 
-ingestión de documentos
+La busqueda combina:
 
-recuperación de contexto
+- similitud vectorial en ChromaDB,
+- busqueda por texto,
+- deduplicacion por `chunk_hash`,
+- seleccion de candidatos y reranking posterior.
 
-conexión con el LLM
+Esto mejora recall y reduce la fragilidad de depender de una sola tecnica de retrieval.
 
-Endpoints principales:
+### 4. Contexto Conversacional
 
-POST /api/upload
-POST /api/ask
+Redis mantiene historial reciente y estado persistente basico por usuario/sesion para:
 
-Procesamiento Asíncrono
+- reconstruir contexto reciente,
+- conservar continuidad conversacional,
+- enriquecer el prompt sin rehidratar toda la historia desde una capa mas costosa.
 
-Apache Kafka
+## Tiempo Real y UX Operacional
 
-Kafka se usa para desacoplar el pipeline de procesamiento:
+El sistema usa Redis Pub/Sub y SSE para reflejar el avance de procesos largos:
 
-upload → kafka topic → parser worker → embedding worker
+- `GET /api/uploads/{batch_id}/stream`
+- `GET /api/queries/{query_id}/stream`
 
+Esto permite una UX reactiva aun cuando el pipeline interno sigue ejecutandose en segundo plano.
 
-Ventajas:
+## Observabilidad
 
-escalabilidad
+La plataforma incluye monitoreo con Prometheus y Grafana.
 
-resiliencia
+### Que Se Mide
 
-procesamiento paralelo
+Se exponen metricas de:
 
-Vector Store
+- throughput de uploads,
+- volumen de bytes ingeridos,
+- chunks generados por estrategia,
+- batches de embeddings,
+- latencia total de consultas,
+- latencia por etapa del pipeline RAG,
+- latencia por etapa de ingesta,
+- fallos por etapa,
+- memoria RSS por proceso,
+- consumo de CPU por servicio.
 
-ChromaDB
+### Targets Scrapeados
 
-Función:
+Prometheus recolecta metricas de:
 
-almacenar embeddings
+- `backend:8000/metrics`
+- `parser:9101/metrics`
+- `embedding:9102/metrics`
+- `prometheus:9090/metrics`
 
-realizar búsqueda semántica
+### Grafana
 
-Operaciones principales:
+Grafana queda aprovisionado con:
 
-add_documents()
-similarity_search()
+- un datasource de Prometheus,
+- un dashboard inicial llamado `Chatbot RAG Observability`.
 
-Modelo de Lenguaje
+### Limite Actual
 
-Ollama
+El dashboard incluye metricas de proceso Python y metricas de negocio del pipeline. Si se desea monitoreo mas profundo de host, contenedores, disco o red, el siguiente paso natural es agregar exporters como `node-exporter`, `cAdvisor`, `redis-exporter` y exporters para Kafka.
 
-Se usa para:
+## Stack Tecnologico
 
-generar respuestas
+### Frontend
 
-combinar pregunta + contexto recuperado
+- React
+- Vite
+- TypeScript
+- SSE
 
-Ejemplo de modelos posibles:
+### Backend y Pipeline
 
-llama3
-mistral
-phi3
+- FastAPI
+- Kafka
+- Redis
+- ChromaDB
+- Sentence Transformers
+- Ollama
 
-Estado y Cache
+### Plataforma y Operacion
 
-Redis
+- Docker Compose
+- Nginx
+- Prometheus
+- Grafana
 
-Uso:
+## Estructura de Servicios
 
-almacenamiento temporal
+- `backend`: API principal y orquestacion sincronica de consultas.
+- `parser`: procesamiento documental y chunking.
+- `embedding`: generacion de embeddings e indexacion vectorial.
+- `frontend`: interfaz web.
+- `nginx`: reverse proxy y punto unico de entrada.
+- `redis`: estado rapido, pub/sub y contexto.
+- `kafka`: backbone de eventos.
+- `chroma`: persistencia vectorial.
+- `ollama`: inferencia local del LLM.
+- `prometheus`: recoleccion de metricas.
+- `grafana`: visualizacion y analisis operativo.
 
-estado compartido
+## Ejecucion con Docker Compose
 
-caché de resultados
+```bash
+docker compose up --build
+```
 
-Observabilidad
-Métricas
+## URLs Principales
 
-Prometheus
+Con la configuracion actual del repositorio:
 
-Recolecta métricas de:
+- aplicacion: `http://localhost/`
+- API docs: `http://localhost/docs`
+- backend metrics: `http://localhost/metrics`
+- Grafana: `http://localhost/grafana/`
+- Prometheus: `http://localhost/prometheus/`
 
-backend
+## Credenciales de Grafana
 
-workers
+- usuario: `admin`
+- password: `admin`
 
-vector search
+## Endpoints Relevantes
 
-Dashboards
+### Ingesta
 
-Grafana
+- `POST /api/upload`
+- `GET /api/uploads/{batch_id}/status`
+- `GET /api/uploads/{batch_id}/stream`
+- `GET /api/documents/{document_id}/status`
 
-Visualiza:
+### Consulta
 
-latencia
+- `POST /api/ask`
+- `GET /api/queries/{query_id}/status`
+- `GET /api/queries/{query_id}/stream`
 
-throughput
+### Conversacion
 
-uso del modelo
+- `GET /api/users/{user_id}/state`
+- `GET /api/users/{user_id}/sessions/{session_id}/history`
 
-Estructura del proyecto
-chatbot/
+## Señales de Ingenieria que Este Proyecto Demuestra
 
-backend/
- └ app/
-     ├ api/
-     │   ├ ask.py
-     │   └ upload.py
-     │
-     ├ core/
-     │   └ config.py
-     │
-     ├ rag/
-     │   ├ loader.py
-     │   ├ chunker.py
-     │   └ vector_store.py
-     │
-     ├ ingest/
-     │   ├ ingest.py
-     │   ├ rag.py
-     │   └ llm.py
-     │
-     ├ services/
-     │   └ kafka.py
-     │
-     ├ workers/
-     │   ├ parser.py
-     │   └ embeddings.py
-     │
-     └ main.py
+Este proyecto evidencia:
 
-frontend/
- └ src/
-     ├ components/
-     ├ App.tsx
-     └ main.tsx
+- diseno orientado a servicios y eventos en lugar de flujo lineal acoplado,
+- separacion entre aceptacion de trabajo y ejecucion intensiva,
+- versionado documental y metadatos orientados a trazabilidad,
+- observabilidad desde el diseno y no como parche posterior,
+- capacidad de streaming de estado para experiencias reactivas,
+- retrieval hibrido y reranking en vez de un RAG ingenuo de una sola etapa,
+- base apta para evolucionar hacia multi-worker, multi-model o despliegues mas productivos.
 
-nginx/
-kafka/
-redis/
-chromadb/
-prometheus/
-grafana/
-ollama/
+## Proximas Evoluciones Naturales
 
-Pipeline RAG
-1️⃣ Ingestión de documentos
-Usuario sube documento
-       │
-       ▼
-FastAPI /upload
-       │
-       ▼
-Kafka topic
-       │
-       ▼
-Parser Worker
+- agregar exporters de infraestructura para Docker y host,
+- persistir alertas y reglas en Prometheus,
+- introducir retries y DLQ para eventos fallidos,
+- mover de hilos locales a un ejecutor de trabajos mas robusto para consultas,
+- versionar prompts y politicas de retrieval,
+- incorporar autenticacion y multitenancy.
 
+## Conclusion
 
-Se realiza:
-
-lectura del documento
-
-extracción de texto
-
-chunking
-
-2️⃣ Generación de embeddings
-Chunks
-   │
-   ▼
-Embedding Worker
-   │
-   ▼
-Vector Store
-
-
-Se crean embeddings y se almacenan en ChromaDB.
-
-3️⃣ Consulta del usuario
-Pregunta usuario
-      │
-      ▼
-FastAPI /ask
-      │
-      ▼
-embedding de pregunta
-      │
-      ▼
-similarity search
-
-
-Se recuperan los chunks más relevantes.
-
-4️⃣ Generación de respuesta
-Pregunta + contexto
-        │
-        ▼
-Ollama
-        │
-        ▼
-Respuesta final
-
-Despliegue
-
-Servicios principales en contenedores:
-
-frontend
-nginx
-backend
-kafka
-redis
-chromadb
-ollama
-prometheus
-grafana
-
-
-Se orquestan con:
-
-docker compose
-
-Objetivo del proyecto
-
-Construir una plataforma modular de RAG que permita:
-
-ingestión de documentos
-
-consultas semánticas
-
-modelos LLM locales
-
-arquitectura escalable basada en eventos
+La propuesta va mas alla de “subir documentos y preguntarle a un modelo”. Se trata de una plataforma RAG con pipeline observable, componentes especializados y una arquitectura con criterios claros de desacoplamiento, mantenibilidad y capacidad de evolucion.

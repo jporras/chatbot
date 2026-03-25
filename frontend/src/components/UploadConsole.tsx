@@ -8,7 +8,7 @@ type BatchState = {
   items: Record<string, DocumentStatus>;
 };
 
-const ALLOWED_EXTENSIONS = [".pdf", ".md", ".txt"];
+const ALLOWED_EXTENSIONS = [".pdf", ".md"];
 
 function isAllowedFile(file: File): boolean {
   const lower = file.name.toLowerCase();
@@ -25,6 +25,7 @@ function formatBytes(bytes: number): string {
 export default function UploadConsole() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const batchStreamRef = useRef<EventSource | null>(null);
+  const batchCompletedRef = useRef(false);
 
   const [files, setFiles] = useState<File[]>([]);
   const [documentIdsText, setDocumentIdsText] = useState("");
@@ -46,17 +47,6 @@ export default function UploadConsole() {
       ).length,
     };
   }, [batch]);
-
-  function dedupeFiles(nextFiles: File[]): File[] {
-    const map = new Map<string, File>();
-
-    for (const file of [...files, ...nextFiles]) {
-      const key = `${file.name}-${file.size}-${file.lastModified}`;
-      map.set(key, file);
-    }
-
-    return Array.from(map.values());
-  }
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -128,6 +118,7 @@ export default function UploadConsole() {
         batchStreamRef.current.close();
         batchStreamRef.current = null;
       }
+      batchCompletedRef.current = false;
 
       const result = await uploadDocuments(files, documentIds);
 
@@ -158,12 +149,15 @@ export default function UploadConsole() {
             items: DocumentStatus[];
           };
 
-          setBatch({
+          setBatch((prev) => ({
             batchId: snapshot.batch_id,
-            items: Object.fromEntries(
-              snapshot.items.map((item) => [item.document_id, item]),
-            ),
-          });
+            items: {
+              ...(prev?.batchId === snapshot.batch_id ? prev.items : {}),
+              ...Object.fromEntries(
+                snapshot.items.map((item) => [item.document_id, item]),
+              ),
+            },
+          }));
         },
         onDocumentStatus: (payload) => {
           const item = payload as DocumentStatus;
@@ -171,12 +165,17 @@ export default function UploadConsole() {
           setBatch((prev) => {
             if (!prev) return prev;
 
+            const nextItems = {
+              ...prev.items,
+              [item.document_id]: item,
+            };
+            batchCompletedRef.current = Object.values(nextItems).every((entry) =>
+              ["INDEXED", "FAILED"].includes(entry.status),
+            );
+
             return {
               ...prev,
-              items: {
-                ...prev.items,
-                [item.document_id]: item,
-              },
+              items: nextItems,
             };
           });
         },
@@ -184,8 +183,11 @@ export default function UploadConsole() {
           setError(
             "Se perdió la conexión en tiempo real del lote. Recarga la página o vuelve a subir si necesitas retomar el seguimiento.",
           );
-          source.close();
-          batchStreamRef.current = null;
+          if (batchCompletedRef.current) {
+            source.close();
+            batchStreamRef.current = null;
+            return;
+          }
         },
       });
 
@@ -230,12 +232,12 @@ export default function UploadConsole() {
             ref={inputRef}
             type="file"
             multiple
-            accept=".pdf,.md,.txt"
+            accept=".pdf,.md"
             className="hidden"
             onChange={(e) => addFiles(e.target.files)}
           />
 
-          <p className="mt-3 text-sm text-slate-400">PDF, MD o TXT</p>
+          <p className="mt-3 text-sm text-slate-400">PDF o MD</p>
         </div>
 
         <div className="mt-4">

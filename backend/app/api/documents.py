@@ -1,8 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.services.redis_state import RedisStateService
-from app.services.sse import redis_pubsub_stream, sse_format
+from app.services.sse import redis_pubsub_stream, sse_comment, sse_format
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api", tags=["documents"])
 @router.get("/documents/{document_id}/status")
 def get_document_status(document_id: str):
     state = RedisStateService()
-    return state.get_document_status(document_id) or {"detail": "Not found"}
+    status = state.get_document_status(document_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return status
 
 
 @router.get("/uploads/{batch_id}/status")
@@ -26,6 +29,17 @@ async def stream_batch(batch_id: str):
         initial = state.get_batch_status(batch_id)
         yield sse_format("snapshot", {"batch_id": batch_id, "items": initial})
         async for event in redis_pubsub_stream(f"stream:batch:{batch_id}"):
+            if event["event"] == "heartbeat":
+                yield sse_comment()
+                continue
             yield sse_format("document_status", event["data"])
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

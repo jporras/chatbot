@@ -287,9 +287,9 @@ Con la configuracion actual del repositorio:
 - `GET /api/users/{user_id}/state`
 - `GET /api/users/{user_id}/sessions/{session_id}/history`
 
-## Senales de Ingenieria que Este Proyecto Demuestra
+## Señales de Ingenieria que Este Proyecto Demuestra
 
-Para un reclutador o un ingeniero senior revisando el repositorio, este proyecto evidencia:
+Este proyecto evidencia:
 
 - diseno orientado a servicios y eventos en lugar de flujo lineal acoplado,
 - separacion entre aceptacion de trabajo y ejecucion intensiva,
@@ -310,4 +310,4 @@ Para un reclutador o un ingeniero senior revisando el repositorio, este proyecto
 
 ## Conclusion
 
-La propuesta va mas alla de “subir documentos y preguntarle a un modelo”. Se trata de una plataforma RAG con pipeline observable, componentes especializados y una arquitectura con criterios claros de desacoplamiento, mantenibilidad y capacidad de evolucion: justo el tipo de senal que suele separar un prototipo funcional de una pieza de ingenieria seria.
+La propuesta va mas alla de “subir documentos y preguntarle a un modelo”. Se trata de una plataforma RAG con pipeline observable, componentes especializados y una arquitectura con criterios claros de desacoplamiento, mantenibilidad y capacidad de evolucion.
